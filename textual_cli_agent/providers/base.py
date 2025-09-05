@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, TypedDict
 
 
 @dataclass
@@ -14,8 +14,12 @@ class ProviderConfig:
     system_prompt: Optional[str] = None
 
 
-class ToolSpec(Dict[str, Any]):
+class ToolSpec(TypedDict):
     """JSON schema-like tool definition for providers."""
+
+    name: str
+    description: str
+    parameters: Dict[str, Any]
 
 
 class Provider(ABC):

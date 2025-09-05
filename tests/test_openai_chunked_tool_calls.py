@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import types
-from typing import Any, AsyncIterator, Optional, List, Dict
+from typing import Any, AsyncIterator, Optional, List
 import pytest
 
 from textual_cli_agent.providers.openai_provider import OpenAIProvider
@@ -13,7 +13,11 @@ class FakeClient:
         pass
 
     class choices0delta:
-        def __init__(self, content: Optional[str] = None, tc: Optional[List[FakeClient.ChoiceDeltaToolCall]] = None) -> None:
+        def __init__(
+            self,
+            content: Optional[str] = None,
+            tc: Optional[List[FakeClient.ChoiceDeltaToolCall]] = None,
+        ) -> None:
             self.content = content
             self.tool_calls = tc
 

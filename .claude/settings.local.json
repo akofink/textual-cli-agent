@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(uv run coverage run -m pytest:*)",
+      "Bash(uv run coverage:*)"
+    ]
+  },
+  "outputStyle": "default"
+}

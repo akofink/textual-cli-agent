@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+from ..providers.base import ToolSpec
 
 try:
     from mcp import Client
@@ -56,7 +56,11 @@ class McpManager:
                 tools = await client.list_tools()
                 for t in tools:
                     self.tools.append(
-                        McpTool(name=t.name, description=t.description or "", parameters=t.input_schema or {"type": "object"})
+                        McpTool(
+                            name=t.name,
+                            description=t.description or "",
+                            parameters=t.input_schema or {"type": "object"},
+                        )
                     )
             except Exception:
                 continue
@@ -70,7 +74,7 @@ class McpManager:
         self.clients.clear()
         self.tools.clear()
 
-    def tool_specs(self) -> List[Dict[str, Any]]:
+    def tool_specs(self) -> List[ToolSpec]:
         return [
             {"name": t.name, "description": t.description, "parameters": t.parameters}
             for t in self.tools

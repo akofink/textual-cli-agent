@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from .providers.base import Provider
+from .providers.base import Provider, ToolSpec
 from .tools import execute_tool, get_tool_specs
 from .mcp.client import McpManager
 
@@ -13,14 +13,16 @@ class AgentEngine:
         self.provider = provider
         self.mcp_manager = mcp_manager
 
-    def _combined_tool_specs(self) -> List[Dict[str, Any]]:
+    def _combined_tool_specs(self) -> List[ToolSpec]:
         specs = get_tool_specs()
         if self.mcp_manager:
             specs.extend(self.mcp_manager.tool_specs())
         return specs
 
-    async def run_stream(self, messages: List[Dict[str, Any]]) -> AsyncIterator[Dict[str, Any]]:
-        tools = self._combined_tool_specs()
+    async def run_stream(
+        self, messages: List[Dict[str, Any]]
+    ) -> AsyncIterator[Dict[str, Any]]:
+        tools: List[ToolSpec] = self._combined_tool_specs()
         assistant_text_parts: List[str] = []
         tool_calls: List[Dict[str, Any]] = []
         had_tool_calls = False
@@ -36,7 +38,9 @@ class AgentEngine:
                 name = chunk["name"]
                 args = chunk.get("arguments", {})
                 try:
-                    if self.mcp_manager and any(t["name"] == name for t in self.mcp_manager.tool_specs()):
+                    if self.mcp_manager and any(
+                        t["name"] == name for t in self.mcp_manager.tool_specs()
+                    ):
                         result = await self.mcp_manager.execute(name, args)
                     else:
                         result = await execute_tool(name, args)
@@ -44,7 +48,9 @@ class AgentEngine:
                     result = {"error": str(e)}
                 result_str = json.dumps(result, ensure_ascii=False)
                 # Provide provider-formatted tool result message to append
-                tool_msg = self.provider.format_tool_result_message(chunk["id"], result_str)
+                tool_msg = self.provider.format_tool_result_message(
+                    chunk["id"], result_str
+                )
                 yield {"type": "append_message", "message": tool_msg}
                 # Also surface to UI
                 yield {"type": "tool_result", "id": chunk["id"], "content": result_str}

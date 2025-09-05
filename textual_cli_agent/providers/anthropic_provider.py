@@ -19,7 +19,9 @@ class AnthropicProvider(Provider):
             {
                 "name": t["name"],
                 "description": t.get("description", ""),
-                "input_schema": t.get("parameters", {"type": "object", "properties": {}, "required": []}),
+                "input_schema": t.get(
+                    "parameters", {"type": "object", "properties": {}, "required": []}
+                ),
             }
             for t in tools
         ]
@@ -71,23 +73,36 @@ class AnthropicProvider(Provider):
                         "type": "tool_call",
                         "id": event.id,
                         "name": name,
-                        "arguments": json.loads(args) if isinstance(args, str) else args,
+                        "arguments": (
+                            json.loads(args) if isinstance(args, str) else args
+                        ),
                     }
         # End of stream
 
-    def build_assistant_message(self, text: str, tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def build_assistant_message(
+        self, text: str, tool_calls: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         # Anthropic assistant message format includes tool calls in content blocks
         content: List[Dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
         for tc in tool_calls:
-            content.append({
-                "type": "tool_use",
-                "id": tc["id"],
-                "name": tc["name"],
-                "input": tc.get("arguments", {}),
-            })
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tc.get("arguments", {}),
+                }
+            )
         return {"role": "assistant", "content": content}
 
-    def format_tool_result_message(self, tool_call_id: str, content: str) -> Dict[str, Any]:
-        return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_call_id, "content": content}]}
+    def format_tool_result_message(
+        self, tool_call_id: str, content: str
+    ) -> Dict[str, Any]:
+        return {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tool_call_id, "content": content}
+            ],
+        }

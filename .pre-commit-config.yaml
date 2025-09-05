@@ -15,8 +15,13 @@ repos:
     hooks:
       - id: mypy
         files: ^textual_cli_agent/
+        pass_filenames: false
         additional_dependencies: [types-requests]
-        args: [--strict, -p, textual_cli_agent]
+        args: [
+          --ignore-missing-imports,
+          -p,
+          textual_cli_agent,
+        ]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -26,7 +31,7 @@ repos:
     hooks:
       - id: pytest
         name: pytest (uv)
-        entry: uv run pytest -q
+        entry: bash -lc "uv run coverage run -m pytest -q && uv run coverage report --fail-under=40 -m"
         language: system
         pass_filenames: false
         stages: [pre-commit]

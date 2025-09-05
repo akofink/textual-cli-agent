@@ -24,6 +24,7 @@ import glob
 import httpx
 
 from pydantic import BaseModel
+from .providers.base import ToolSpec
 
 R = TypeVar("R")
 ToolFunc = Callable[..., Union[R, Coroutine[Any, Any, R]]]
@@ -99,11 +100,12 @@ def _annotation_to_schema(ann: Any) -> Dict[str, Any]:
     return {"type": "string"}
 
 
-def get_tool_specs() -> List[Dict[str, Any]]:
-    return [
+def get_tool_specs() -> List[ToolSpec]:
+    specs: List[ToolSpec] = [
         {"name": t.name, "description": t.description, "parameters": t.parameters}
         for t in _TOOL_REGISTRY.values()
     ]
+    return specs
 
 
 async def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
