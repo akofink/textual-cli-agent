@@ -4,7 +4,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(uv run coverage run -m pytest:*)",
-      "Bash(uv run coverage:*)"
+      "Bash(uv run coverage:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run:*)"
     ]
   },
   "outputStyle": "default"

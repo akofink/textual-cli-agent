@@ -1,0 +1,8 @@
+**You:** Explain this repo
+[tool result] ["DEVELOPING.md", "README.md", "chat_export.txt", "pyproject.toml", "tests", "tests/__pycache__", "tests/__pycache__/conftest.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_anthropic_provider.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_builtin_tools.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_cli_help.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_engine.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_openai_chunked_tool_calls.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_openai_provider_formatting.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_tools_registry.cpython-312-pytest-8.4.2.pyc", "tests/__pycache__/test_ui_ctrl_quit.cpython-312-pytest-8.4.2.pyc", "tests/conftest.py", "tests/mypy.ini", "tests/test_anthropic_provider.py", "tests/test_builtin_tools.py", "tests/test_cli_help.py", "tests/test_engine.py", "tests/test_openai_chunked_tool_calls.py", "tests/test_openai_provider_formatting.py", "tests/test_tools_registry.py"... (truncated)
+
+---
+**You:** Explain it
+[ERROR] API call failed: Error code: 400 - {'error': {'message': "Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.", 'type': 'invalid_request_error', 'param': 'messages.[2].role', 'code': None}}
+
+---

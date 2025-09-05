@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 
 from .base import Provider, ProviderConfig, ToolSpec
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider(Provider):
@@ -29,54 +32,115 @@ class AnthropicProvider(Provider):
     async def completions_stream(
         self, messages: List[Dict[str, Any]], tools: Optional[List[ToolSpec]] = None
     ) -> AsyncIterator[Dict[str, Any]]:
-        # Convert messages to Anthropic format
-        sys = self.cfg.system_prompt
-        conv: List[Dict[str, Any]] = []
-        for m in messages:
-            role = m["role"]
-            if role == "system":
-                sys = m["content"]
-                continue
-            content = m.get("content")
-            # Anthropics expects a list of objects
-            if isinstance(content, str):
-                content = [{"type": "text", "text": content}]
-            conv.append({"role": role, "content": content})
-        tool_schema = await self.list_tools_format(tools or []) if tools else None
-
-        stream_params: Dict[str, Any] = {
-            "model": self.cfg.model,
-            "system": sys,
-            "messages": conv,
-        }
-        if self.cfg.temperature is not None:
-            stream_params["temperature"] = self.cfg.temperature
-        if tool_schema:
-            stream_params["tools"] = tool_schema
-            stream_params["tool_choice"] = {"type": "auto"}
-
-        with self.client.messages.stream(**stream_params) as stream:
-            async for event in stream:
-                et = event.type
-                if et == "message_start":
+        try:
+            # Convert messages to Anthropic format
+            sys = self.cfg.system_prompt
+            conv: List[Dict[str, Any]] = []
+            for m in messages:
+                try:
+                    role = m.get("role", "user")
+                    if role == "system":
+                        sys = m.get("content", "")
+                        continue
+                    content = m.get("content")
+                    if content is None:
+                        logger.warning(f"Message missing content: {m}")
+                        continue
+                    # Anthropics expects a list of objects
+                    if isinstance(content, str):
+                        content = [{"type": "text", "text": content}]
+                    conv.append({"role": role, "content": content})
+                except Exception as e:
+                    logger.error(f"Error processing message {m}: {e}")
                     continue
-                if et == "content_block_start":
-                    continue
-                if et == "content_block_delta":
-                    if event.delta.get("type") == "text_delta":
-                        yield {"type": "text", "delta": event.delta.get("text", "")}
-                if et == "tool_call":
-                    # anthropic tool call events
-                    name = event.name
-                    args = event.arguments
-                    yield {
-                        "type": "tool_call",
-                        "id": event.id,
-                        "name": name,
-                        "arguments": (
-                            json.loads(args) if isinstance(args, str) else args
-                        ),
-                    }
+
+            if not conv:
+                logger.error("No valid messages to process")
+                yield {"type": "text", "delta": "[ERROR] No valid messages to process"}
+                return
+
+            tool_schema = await self.list_tools_format(tools or []) if tools else None
+
+            stream_params: Dict[str, Any] = {
+                "model": self.cfg.model,
+                "messages": conv,
+            }
+
+            if sys:
+                stream_params["system"] = sys
+
+            if self.cfg.temperature is not None:
+                stream_params["temperature"] = self.cfg.temperature
+            if tool_schema:
+                stream_params["tools"] = tool_schema
+                stream_params["tool_choice"] = {"type": "auto"}
+
+            try:
+                with self.client.messages.stream(**stream_params) as stream:
+                    try:
+                        async for event in stream:
+                            try:
+                                if not event or not hasattr(event, "type"):
+                                    continue
+
+                                et = event.type
+                                if et == "message_start":
+                                    continue
+                                if et == "content_block_start":
+                                    continue
+                                if et == "content_block_delta":
+                                    if (
+                                        hasattr(event, "delta")
+                                        and event.delta
+                                        and event.delta.get("type") == "text_delta"
+                                    ):
+                                        text = event.delta.get("text", "")
+                                        if text:
+                                            yield {"type": "text", "delta": text}
+                                if et == "tool_call":
+                                    # anthropic tool call events
+                                    if hasattr(event, "name") and hasattr(event, "id"):
+                                        name = event.name or "unknown_tool"
+                                        args = getattr(event, "arguments", {})
+                                        try:
+                                            if isinstance(args, str):
+                                                args = (
+                                                    json.loads(args)
+                                                    if args.strip()
+                                                    else {}
+                                                )
+                                            yield {
+                                                "type": "tool_call",
+                                                "id": event.id,
+                                                "name": name,
+                                                "arguments": args,
+                                            }
+                                        except json.JSONDecodeError as je:
+                                            logger.error(
+                                                f"JSON decode error for tool call {event.id}: {je}"
+                                            )
+                                            yield {
+                                                "type": "tool_call",
+                                                "id": event.id,
+                                                "name": name,
+                                                "arguments": {},
+                                            }
+                            except Exception as e:
+                                logger.error(f"Error processing stream event: {e}")
+                                continue
+                    except Exception as e:
+                        logger.error(f"Error during stream iteration: {e}")
+                        yield {
+                            "type": "text",
+                            "delta": f"[ERROR] Stream iteration failed: {str(e)}",
+                        }
+            except Exception as e:
+                logger.error(f"Anthropic API call failed: {e}")
+                yield {"type": "text", "delta": f"[ERROR] API call failed: {str(e)}"}
+                return
+        except Exception as e:
+            logger.error(f"Unexpected error in completions_stream: {e}")
+            yield {"type": "text", "delta": f"[ERROR] Unexpected error: {str(e)}"}
         # End of stream
 
     def build_assistant_message(
