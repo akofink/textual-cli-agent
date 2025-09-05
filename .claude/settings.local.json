@@ -7,7 +7,8 @@
       "Bash(uv run coverage:*)",
       "Bash(uv run pytest:*)",
       "Bash(uv run:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(uv add:*)"
     ]
   },
   "outputStyle": "default"

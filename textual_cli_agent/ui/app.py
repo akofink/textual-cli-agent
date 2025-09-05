@@ -72,7 +72,7 @@ class ChatApp(App):  # type: ignore[misc]
             pyperclip = None  # type: ignore
 
         try:
-            chat: ChatView = self.query_one("#chat")
+            chat = self.query_one("#chat", ChatView)
             text = chat.get_text()
         except Exception as e:
             logger.error(f"Error getting chat text: {e}")
@@ -137,7 +137,7 @@ class ChatApp(App):  # type: ignore[misc]
     def on_mount(self) -> None:
         if self._initial_markdown:
             try:
-                chat: ChatView = self.query_one("#chat")
+                chat = self.query_one("#chat", ChatView)
                 chat.append_block(self._initial_markdown)
             except Exception as e:
                 logger.error(f"Error displaying initial markdown: {e}")
@@ -156,7 +156,7 @@ class ChatApp(App):  # type: ignore[misc]
             except Exception as e:
                 logger.warning(f"Failed to clear input: {e}")
 
-            chat: ChatView = self.query_one("#chat")
+            chat = self.query_one("#chat", ChatView)
             chat.append_block(f"**You:** {prompt}")
             # Append assistant header on a new line to separate visually from the prompt
             chat.append_block("")
@@ -201,7 +201,7 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.error(f"Unexpected error in on_input_submitted: {e}")
             try:
-                error_chat: ChatView = self.query_one("#chat")
+                error_chat = self.query_one("#chat", ChatView)
                 error_chat.append_block(f"**[ERROR]** Unexpected error: {str(e)}")
             except Exception:
                 pass  # If we can't even display the error, just log it

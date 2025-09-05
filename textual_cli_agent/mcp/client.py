@@ -8,14 +8,14 @@ from ..providers.base import ToolSpec
 logger = logging.getLogger(__name__)
 
 try:
-    from mcp import Client
-    from mcp.transport.stdio import StdioServerParameters, stdio_client
-    from mcp.transport.http import http_client
+    from mcp import Client  # type: ignore[import-not-found,attr-defined]
+    from mcp.transport.stdio import StdioServerParameters, stdio_client  # type: ignore[import-not-found]
+    from mcp.transport.http import http_client  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - SDK optional
-    Client = None
-    StdioServerParameters = None
-    stdio_client = None
-    http_client = None
+    Client = None  # type: ignore[misc,assignment]
+    StdioServerParameters = None  # type: ignore[misc,assignment]
+    stdio_client = None  # type: ignore[misc,assignment]
+    http_client = None  # type: ignore[misc,assignment]
 
 
 @dataclass

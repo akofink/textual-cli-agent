@@ -76,7 +76,7 @@ class AnthropicProvider(Provider):
                 stream_params["tool_choice"] = {"type": "auto"}
 
             try:
-                with self.client.messages.stream(**stream_params) as stream:
+                async with self.client.messages.stream(**stream_params) as stream:
                     try:
                         async for event in stream:
                             try:
@@ -89,14 +89,22 @@ class AnthropicProvider(Provider):
                                 if et == "content_block_start":
                                     continue
                                 if et == "content_block_delta":
-                                    if (
-                                        hasattr(event, "delta")
-                                        and event.delta
-                                        and event.delta.get("type") == "text_delta"
-                                    ):
-                                        text = event.delta.get("text", "")
-                                        if text:
-                                            yield {"type": "text", "delta": text}
+                                    if hasattr(event, "delta") and event.delta:
+                                        # Handle delta as dict-like object
+                                        if (
+                                            hasattr(event.delta, "type")
+                                            and event.delta.type == "text_delta"
+                                        ):
+                                            text = getattr(event.delta, "text", "")
+                                            if text:
+                                                yield {"type": "text", "delta": text}
+                                        elif (
+                                            isinstance(event.delta, dict)
+                                            and event.delta.get("type") == "text_delta"
+                                        ):
+                                            text = event.delta.get("text", "")
+                                            if text:
+                                                yield {"type": "text", "delta": text}
                                 if et == "tool_call":
                                     # anthropic tool call events
                                     if hasattr(event, "name") and hasattr(event, "id"):
