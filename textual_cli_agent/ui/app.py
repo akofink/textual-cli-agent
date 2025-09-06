@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 import json
+import asyncio
 
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Input, RichLog
@@ -254,13 +255,17 @@ class ChatApp(App):  # type: ignore[misc]
         rounds = 0
         while True:
             had_tools_this_round = False
+            text_buf = ""
             async for chunk in self.engine.run_stream(self.messages):
+                # Ensure UI stays responsive in long streams (no-op in tests)
+                await asyncio.sleep(0)
                 try:
                     ctype = chunk.get("type")
                     if ctype == "text":
                         delta = chunk.get("delta", "")
                         if delta:
-                            chat.append_text(delta)
+                            # Buffer text to avoid excessive newlines / fragmentation
+                            text_buf += delta
                     elif ctype == "tool_call":
                         tool_name = chunk.get("name", "unknown_tool")
                         tool_args = chunk.get("arguments", {})
@@ -320,6 +325,10 @@ class ChatApp(App):  # type: ignore[misc]
                                 )
                             self.messages.append(message)
                     elif ctype == "round_complete":
+                        # Flush any buffered text once at end of turn
+                        if text_buf:
+                            chat.append_text(text_buf)
+                            text_buf = ""
                         chat.append_hr()
                         had_tools_this_round = bool(chunk.get("had_tool_calls", False))
                         break
