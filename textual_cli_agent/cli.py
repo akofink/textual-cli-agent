@@ -86,7 +86,10 @@ def chat(
             "You have access to the local filesystem and other capabilities via callable tools. "
             f"Available tools include: {tool_names}. "
             "Use them when needed (e.g., read README.md or pyproject.toml to understand the repo). "
-            "When asked about the project, explore files and summarize. Be precise, cite filenames, and avoid hallucinations."
+            "When asked about the project, explore files and summarize. Be precise, cite filenames, and avoid hallucinations. "
+            "IMPORTANT: You have a limited number of tool-calling rounds per conversation (default 15). "
+            "Be strategic with tool usage - batch related operations when possible and prioritize the most important tasks. "
+            "If you reach the round limit, you'll be given one final opportunity to respond without tools."
         )
 
     prov = ProviderFactory.create(

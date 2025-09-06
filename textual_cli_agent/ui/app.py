@@ -145,11 +145,51 @@ class ChatApp(App):  # type: ignore[misc]
         text-align: center;
         padding: 0 1;
     }
+
+    #tool_panel {
+        display: none;
+        width: 35%;
+        dock: right;
+        border: solid $primary;
+        background: $surface;
+    }
+
+    #tool_panel.visible {
+        display: block;
+    }
+
+    .panel-header {
+        dock: top;
+        height: 1;
+        background: $primary;
+        color: $text;
+        text-align: center;
+        content-align: center middle;
+    }
+
+    .tool-panel-content {
+        height: 100%;
+    }
+
+    .tool-details {
+        dock: bottom;
+        height: 50%;
+        border: solid $accent;
+        background: $panel;
+        padding: 1;
+        overflow-y: auto;
+    }
+
+    #tool_tree {
+        height: 1fr;
+        background: $surface;
+    }
     """
 
     BINDINGS = [
         Binding("ctrl+?", "help_panel", "Help", show=True),
         Binding("ctrl+t", "toggle_todo", "TODO", show=True),
+        Binding("f2", "toggle_tools", "Tools", show=True),
         # Core navigation - keep Toad-like simplicity
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
@@ -271,7 +311,7 @@ class ChatApp(App):  # type: ignore[misc]
 
         # Runtime toggles - load from config with defaults
         self.auto_continue: bool = self.config.get("auto_continue", True)
-        self.max_rounds: int = self.config.get("max_rounds", 6)
+        self.max_rounds: int = self.config.get("max_rounds", 15)
         # Background processing and queuing
         self._worker_task: Optional[asyncio.Task] = None
         self._pending_count: int = 0
@@ -595,7 +635,39 @@ class ChatApp(App):  # type: ignore[misc]
                     chat.append_text(f"[ERROR] Processing error: {str(e)}")
                     continue
             rounds += 1
-            if not had_tools_this_round or rounds >= self.max_rounds:
+            # Allow one more round for final response even if we hit max rounds
+            if not had_tools_this_round:
+                break
+            if rounds >= self.max_rounds:
+                # Add a message to inform the agent it's at the round limit
+                self.messages.append({
+                    "role": "user",
+                    "content": f"[SYSTEM] You have reached the maximum number of tool-calling rounds ({self.max_rounds}). Please provide a final response without using any more tools.",
+                })
+                # Allow one final round for response without tools
+                text_buf = ""
+                try:
+                    self.sub_title = "Final response..."
+                except Exception:
+                    pass
+                self._update_status(working=True)
+                async for chunk in self.engine.run_stream(self.messages):
+                    await asyncio.sleep(0)
+                    try:
+                        ctype = chunk.get("type")
+                        if ctype == "text":
+                            delta = chunk.get("delta", "")
+                            text_buf += delta
+                            chat.append_text(delta)
+                        elif ctype == "round_complete":
+                            if text_buf:
+                                chat.append_block(text_buf)
+                            break
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing final response chunk {chunk}: {e}"
+                        )
+                        continue
                 break
             # Restore header subtitle to status between rounds
             try:
