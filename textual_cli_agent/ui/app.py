@@ -196,7 +196,7 @@ class ChatApp(App):  # type: ignore[misc]
 
     def on_key(self, event: events.Key) -> None:
         # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
-        if event.key in ("ctrl+q", "ctrl+d"):
+        if event.key in ("ctrl+c", "ctrl+q", "ctrl+d"):
             event.prevent_default()
             event.stop()
             self.exit()
@@ -408,6 +408,11 @@ class ChatApp(App):  # type: ignore[misc]
             pass
         # Initialize footer status
         self._update_status(working=False)
+        # Focus the input field on startup
+        try:
+            self.query_one("#input", Input).focus()
+        except Exception:
+            pass  # Input may not be mounted yet
         if self._initial_markdown:
             try:
                 chat = self.query_one("#chat", ChatView)
@@ -873,10 +878,9 @@ class ChatApp(App):  # type: ignore[misc]
 
     async def on_input_submitted(self, event: Any) -> None:
         try:
-            prompt = event.value
-            # Ctrl+D/EOF produces empty string; treat as quit
-            if prompt == "":
-                await self.action_quit()
+            prompt = event.value.strip()
+            # Skip empty submissions
+            if not prompt:
                 return
 
             # Clear input

@@ -189,8 +189,8 @@ async def test_chat_app_query_error():
 
 
 @pytest.mark.asyncio
-async def test_chat_app_empty_input_quit():
-    """Test ChatApp handles empty input (quit) correctly."""
+async def test_chat_app_empty_input_no_quit():
+    """Test ChatApp handles empty input correctly (should not quit)."""
     provider = MockProvider()
     app = ChatApp(provider)
 
@@ -201,8 +201,8 @@ async def test_chat_app_empty_input_quit():
 
     await app.on_input_submitted(event)
 
-    # Should have called quit
-    app.action_quit.assert_called_once()
+    # Should NOT have called quit - empty input should be ignored
+    app.action_quit.assert_not_called()
 
 
 def test_chat_app_key_handling():
