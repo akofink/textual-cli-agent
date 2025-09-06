@@ -16,6 +16,7 @@ from rich.text import Text
 from ..engine import AgentEngine
 from ..providers.base import Provider, ProviderConfig, ProviderFactory
 from ..mcp.client import McpManager
+from ..config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,55 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.error(f"Error applying provider config: {e}")
 
+    def _apply_saved_provider_config(self) -> None:
+        """Apply any saved provider configuration from config file."""
+        try:
+            saved_provider = self.config.get("provider")
+            saved_model = self.config.get("model")
+            saved_temp = self.config.get("temperature")
+
+            # Only apply changes if we have saved values
+            changes_needed = False
+
+            # Check if provider type needs to change
+            current_provider_type = (
+                type(self.provider).__name__.replace("Provider", "").lower()
+            )
+            if saved_provider and saved_provider != current_provider_type:
+                changes_needed = True
+
+            # Check if model or temperature need to change
+            if saved_model and saved_model != self.provider.cfg.model:
+                changes_needed = True
+            if saved_temp is not None and saved_temp != self.provider.cfg.temperature:
+                changes_needed = True
+
+            if changes_needed:
+                # Create new provider config with saved values
+                cfg = ProviderConfig(
+                    model=saved_model or self.provider.cfg.model,
+                    api_key=self.provider.cfg.api_key,
+                    base_url=self.provider.cfg.base_url,
+                    temperature=saved_temp
+                    if saved_temp is not None
+                    else self.provider.cfg.temperature,
+                    system_prompt=self.provider.cfg.system_prompt,
+                )
+
+                if saved_provider and saved_provider in ("openai", "anthropic"):
+                    new_provider = ProviderFactory.create(saved_provider, cfg)
+                else:
+                    # Just update config of existing provider
+                    new_provider = type(self.provider)(cfg)
+
+                self.provider = new_provider
+                self.engine.provider = new_provider
+                logger.debug(
+                    f"Applied saved provider config: {saved_provider}, {saved_model}, {saved_temp}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to apply saved provider config: {e}")
+
     def on_key(self, event: events.Key) -> None:
         # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
         if event.key in ("ctrl+c", "ctrl+q", "ctrl+d"):
@@ -215,9 +265,13 @@ class ChatApp(App):  # type: ignore[misc]
         self._initial_markdown = initial_markdown or ""
         # Track tool calls by id to enhance result display
         self._tool_calls_by_id: Dict[str, Dict[str, Any]] = {}
-        # Runtime toggles
-        self.auto_continue: bool = True
-        self.max_rounds: int = 6
+
+        # Config persistence
+        self.config = ConfigManager()
+
+        # Runtime toggles - load from config with defaults
+        self.auto_continue: bool = self.config.get("auto_continue", True)
+        self.max_rounds: int = self.config.get("max_rounds", 6)
         # Background processing and queuing
         self._worker_task: Optional[asyncio.Task] = None
         self._pending_count: int = 0
@@ -226,7 +280,10 @@ class ChatApp(App):  # type: ignore[misc]
         self._displayed_tool_calls: set[str] = set()
         # Simple TODO list pane
         self._todos: List[str] = []
-        self._show_todo: bool = False
+        self._show_todo: bool = self.config.get("show_todo", False)
+
+        # Apply any saved provider config overrides
+        self._apply_saved_provider_config()
 
     def action_copy_chat(self) -> None:
         """Enhanced copy functionality inspired by Toad's text interaction."""
@@ -291,6 +348,7 @@ class ChatApp(App):  # type: ignore[misc]
     def action_toggle_todo(self) -> None:
         try:
             self._show_todo = not self._show_todo
+            self.config.set("show_todo", self._show_todo)
             chat = self.query_one("#chat", ChatView)
             self._render_todos(chat)
         except Exception as e:
@@ -564,6 +622,7 @@ class ChatApp(App):  # type: ignore[misc]
                 ok(
                     "Commands:\n"
                     "/help\n"
+                    "/config\n"
                     "/model <name>\n"
                     "/provider <openai|anthropic>\n"
                     "/temp <float>\n"
@@ -581,10 +640,24 @@ class ChatApp(App):  # type: ignore[misc]
                     "/todo show|hide\n"
                 )
                 return True
+            if cmd == "/config":
+                config_data = self.config.get_all()
+                if config_data:
+                    config_lines = [
+                        f"  {k}: {v}" for k, v in sorted(config_data.items())
+                    ]
+                    config_text = "Current configuration:\n" + "\n".join(config_lines)
+                    config_text += f"\n\nConfig file: {self.config.config_file_path}"
+                else:
+                    config_text = "No configuration saved yet.\n\nSettings will be saved when you change them via commands like /model, /temp, etc."
+                ok(config_text)
+                return True
             if cmd == "/model" and args:
-                self._apply_provider_config(model=" ".join(args))
+                model_name = " ".join(args)
+                self._apply_provider_config(model=model_name)
+                self.config.set("model", model_name)
                 self._refresh_header()
-                ok(f"model set -> {' '.join(args)}")
+                ok(f"model set -> {model_name}")
                 return True
             if cmd == "/provider" and args:
                 prov = args[0].lower()
@@ -602,6 +675,7 @@ class ChatApp(App):  # type: ignore[misc]
                     new_provider = ProviderFactory.create(prov, cfg)
                     self.provider = new_provider
                     self.engine.provider = new_provider
+                    self.config.set("provider", prov)
                     self._refresh_header()
                     ok(f"provider -> {prov}")
                 except Exception as e:
@@ -614,6 +688,7 @@ class ChatApp(App):  # type: ignore[misc]
                     err("temp must be a float")
                     return True
                 self._apply_provider_config(temperature=t)
+                self.config.set("temperature", t)
                 self._refresh_header()
                 ok(f"temperature set -> {t}")
                 return True
@@ -626,6 +701,7 @@ class ChatApp(App):  # type: ignore[misc]
             if cmd == "/auto" and args:
                 val = args[0].lower()
                 self.auto_continue = val in ("on", "true", "1", "yes")
+                self.config.set("auto_continue", self.auto_continue)
                 self._refresh_header()
                 ok(f"auto-continue -> {self.auto_continue}")
                 return True
@@ -636,6 +712,7 @@ class ChatApp(App):  # type: ignore[misc]
                     err("rounds must be an integer")
                     return True
                 self.max_rounds = max(1, n)
+                self.config.set("max_rounds", self.max_rounds)
                 self._refresh_header()
                 ok(f"max rounds -> {self.max_rounds}")
                 return True
@@ -732,6 +809,7 @@ class ChatApp(App):  # type: ignore[misc]
                     return True
                 if sub in ("show", "hide"):
                     self._show_todo = sub == "show"
+                    self.config.set("show_todo", self._show_todo)
                     self._render_todos(chat)
                     ok(f"todo -> {sub}")
                     return True
