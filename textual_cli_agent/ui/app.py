@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+import json
 
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Input, RichLog
@@ -22,11 +23,11 @@ class ChatView(RichLog):  # type: ignore[misc]
     def __init__(self, **kwargs) -> None:
         # Extract widget-specific arguments before passing to RichLog
         super().__init__(
-            auto_scroll=True,  # Toad-like smooth auto-scrolling
-            markup=True,  # Rich markup support for better formatting
-            highlight=True,  # Code highlighting like Toad
-            max_lines=10000,  # Large scrollback buffer for history
-            **kwargs,  # Pass through any other widget arguments (like id)
+            auto_scroll=True,
+            markup=True,
+            highlight=False,  # disable code highlighting during streaming to reduce mixing
+            max_lines=20000,  # larger buffer
+            **kwargs,
         )
         self._current_text = ""
 
@@ -50,34 +51,39 @@ class ChatView(RichLog):  # type: ignore[misc]
         return "\n".join(lines)
 
     def append_text(self, text: str) -> None:
-        """Append streaming text - optimized for Toad-like performance."""
+        """Append streaming text with sane wrapping."""
         self._current_text += text
         try:
-            # Use Rich's Text for better rendering control
-            rich_text = Text(text)
+            rich_text = Text(text, no_wrap=False, overflow="fold")
             self.write(rich_text)
         except Exception as e:
             logger.error(f"Error writing text to RichLog: {e}")
-            # Fallback to plain string
             try:
                 self.write(text)
             except Exception:
-                pass  # Can't update, just continue
+                pass
 
     def append_block(self, md: str) -> None:
-        """Append markdown as a formatted block."""
-        self._current_text += f"\n{md}"
+        """Append markdown as a formatted block with clear separation."""
+        self._current_text += f"\n{md}\n"
         try:
-            # Try rendering as markdown first
             markdown = Markdown(md)
             self.write(markdown)
         except Exception as e:
             logger.error(f"Error rendering markdown in RichLog: {e}")
-            # Fallback to plain text
             try:
                 self.write(md)
             except Exception:
-                pass  # Can't update, just continue
+                pass
+
+    def append_hr(self) -> None:
+        try:
+            self.write(Markdown("\n---\n"))
+        except Exception:
+            try:
+                self.write("\n---\n")
+            except Exception:
+                pass
 
 
 class ChatApp(App):  # type: ignore[misc]
@@ -164,6 +170,7 @@ class ChatApp(App):  # type: ignore[misc]
         scrollbar-color: $accent;
         scrollbar-corner-color: $panel;
         scrollbar-size: 1 1;
+        text-wrap: wrap; /* ensure wrapping vs horizontal scroll */
     }
 
     #input {
@@ -173,7 +180,6 @@ class ChatApp(App):  # type: ignore[misc]
         background: $surface;
     }
 
-    /* Toad-inspired clean styling */
     RichLog {
         background: $surface;
         color: $text;
@@ -255,9 +261,9 @@ class ChatApp(App):  # type: ignore[misc]
                 logger.warning(f"Failed to clear input: {e}")
 
             chat = self.query_one("#chat", ChatView)
-            chat.append_block(f"**You:** {prompt}")
-            # Append assistant header on a new line to separate visually from the prompt
-            chat.append_block("")
+            # Show user prompt as its own block
+            chat.append_block(f"**You:**\n{prompt}")
+            chat.append_hr()
             self.messages.append({"role": "user", "content": prompt})
 
             try:
@@ -276,17 +282,35 @@ class ChatApp(App):  # type: ignore[misc]
                             chat.append_block(f"[tool call] {tool_name}({tool_args})")
                         elif ctype == "tool_result":
                             content = chunk.get("content", "")
-                            # Truncate very long tool results for display
-                            if len(str(content)) > 1000:
-                                content = str(content)[:1000] + "... (truncated)"
-                            chat.append_block(f"[tool result] {content}")
+                            try:
+                                # Pretty-print JSON where possible
+                                parsed = json.loads(content)
+                                pretty = json.dumps(
+                                    parsed, indent=2, ensure_ascii=False
+                                )
+                                content = pretty
+                            except Exception:
+                                # If not JSON, keep as-is
+                                pass
+                            # Truncate extremely large outputs for display only
+                            max_display = 8000
+                            if len(str(content)) > max_display:
+                                display = (
+                                    str(content)[:max_display]
+                                    + "\n... (truncated in view)"
+                                )
+                            else:
+                                display = str(content)
+                            chat.append_block(f"[tool result]\n{display}")
+                            chat.append_hr()
                         elif ctype == "append_message":
                             # Engine is asking us to append a message to conversation to maintain correct provider format
                             message = chunk.get("message", {})
                             if message:
                                 self.messages.append(message)
                         elif ctype == "round_complete":
-                            chat.append_block("\n---")
+                            # Add a clear separator before the assistant's final text
+                            chat.append_hr()
                             break
                     except Exception as e:
                         logger.error(f"Error processing chunk {chunk}: {e}")
