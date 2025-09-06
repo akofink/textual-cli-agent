@@ -58,6 +58,7 @@ class AgentEngine:
 
             assistant_text_parts: List[str] = []
             tool_calls: List[Dict[str, Any]] = []
+            pending_tool_messages: List[Dict[str, Any]] = []
             had_tool_calls = False
 
             try:
@@ -94,24 +95,25 @@ class AgentEngine:
                                     {"error": f"Result serialization failed: {str(e)}"}
                                 )
 
-                            # Provide provider-formatted tool result message to append
+                            # Prepare provider-formatted tool result message to append AFTER assistant tool_calls
                             try:
                                 tool_msg = self.provider.format_tool_result_message(
                                     tool_call_id, result_str
                                 )
-                                yield {"type": "append_message", "message": tool_msg}
+                                pending_tool_messages.append(tool_msg)
                             except Exception as e:
                                 logger.error(
                                     f"Error formatting tool result message: {e}"
                                 )
-                                # Fallback message format
-                                fallback_msg = {"role": "tool", "content": result_str}
-                                yield {
-                                    "type": "append_message",
-                                    "message": fallback_msg,
+                                # Fallback message format with required tool_call_id
+                                fallback_msg = {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": result_str,
                                 }
+                                pending_tool_messages.append(fallback_msg)
 
-                            # Also surface to UI
+                            # Also surface to UI (does not affect provider message ordering)
                             yield {
                                 "type": "tool_result",
                                 "id": tool_call_id,
@@ -142,11 +144,15 @@ class AgentEngine:
             except Exception as e:
                 logger.error(f"Error building assistant message: {e}")
                 # Fallback message
-                fallback_msg = {
+                assistant_msg = {
                     "role": "assistant",
                     "content": "".join(assistant_text_parts),
                 }
-                yield {"type": "append_message", "message": fallback_msg}
+                yield {"type": "append_message", "message": assistant_msg}
+
+            # Append any pending tool result messages AFTER the assistant message that contains tool_calls
+            for tmsg in pending_tool_messages:
+                yield {"type": "append_message", "message": tmsg}
 
             yield {"type": "round_complete", "had_tool_calls": had_tool_calls}
 
