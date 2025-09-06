@@ -8,14 +8,25 @@ from ..providers.base import ToolSpec
 logger = logging.getLogger(__name__)
 
 try:
-    from mcp import Client  # type: ignore[import-not-found,attr-defined]
-    from mcp.transport.stdio import StdioServerParameters, stdio_client  # type: ignore[import-not-found]
-    from mcp.transport.http import http_client  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover - SDK optional
+    from mcp import StdioServerParameters, stdio_client  # type: ignore[import-not-found,attr-defined]
+    from mcp.client.session import ClientSession as Client  # type: ignore[import-not-found]
+
+    # http_client is not available in this version, remove it
+    http_client = None  # type: ignore[misc,assignment]
+    MCP_AVAILABLE = True
+except ImportError:  # pragma: no cover - SDK optional
     Client = None  # type: ignore[misc,assignment]
     StdioServerParameters = None  # type: ignore[misc,assignment]
     stdio_client = None  # type: ignore[misc,assignment]
     http_client = None  # type: ignore[misc,assignment]
+    MCP_AVAILABLE = False
+except Exception as e:  # pragma: no cover - unexpected errors during import
+    logger.error(f"Unexpected error importing MCP: {e}")
+    Client = None  # type: ignore[misc,assignment]
+    StdioServerParameters = None  # type: ignore[misc,assignment]
+    stdio_client = None  # type: ignore[misc,assignment]
+    http_client = None  # type: ignore[misc,assignment]
+    MCP_AVAILABLE = False
 
 
 @dataclass
@@ -36,8 +47,8 @@ class McpManager:
         http_urls: List[str] | None = None,
         grpc_endpoints: List[str] | None = None,  # scaffold
     ) -> None:
-        if Client is None:
-            logger.warning("MCP SDK not available, skipping MCP connections")
+        if not MCP_AVAILABLE:
+            logger.info("MCP package not available, skipping MCP connections")
             return  # MCP not available, noop
 
         stdio_cmds = stdio_cmds or []
@@ -56,16 +67,21 @@ class McpManager:
                 logger.error(f"Failed to connect to stdio MCP server {cmd}: {e}")
                 continue
 
-        # Connect HTTP servers
-        for url in http_urls:
-            try:
-                logger.info(f"Connecting to MCP HTTP server: {url}")
-                client = await http_client(url)
-                self.clients.append(client)
-                logger.info(f"Successfully connected to HTTP server: {url}")
-            except Exception as e:
-                logger.error(f"Failed to connect to HTTP MCP server {url}: {e}")
-                continue
+        # Connect HTTP servers (skip if not available)
+        if http_client is not None:
+            for url in http_urls:
+                try:
+                    logger.info(f"Connecting to MCP HTTP server: {url}")
+                    client = await http_client(url)
+                    self.clients.append(client)
+                    logger.info(f"Successfully connected to HTTP server: {url}")
+                except Exception as e:
+                    logger.error(f"Failed to connect to HTTP MCP server {url}: {e}")
+                    continue
+        elif http_urls:
+            logger.warning(
+                "HTTP MCP clients requested but not available in this MCP version"
+            )
 
         # Collect tools from servers
         successful_clients = []

@@ -4,12 +4,16 @@ import logging
 from typing import Any, Dict, List, Optional
 import json
 import asyncio
+from pathlib import Path
+from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Input, RichLog, Static
-from textual.containers import Vertical
+from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
 from textual import events
+from textual.command import Hit, Hits, Provider as CommandProvider
+from functools import partial
 from rich.markdown import Markdown
 from rich.text import Text
 
@@ -18,8 +22,87 @@ from ..providers.base import Provider, ProviderConfig, ProviderFactory
 from ..mcp.client import McpManager
 from ..config import ConfigManager
 from .tool_panel import ToolPanel
+from .todo_panel import TodoPanel
 
 logger = logging.getLogger(__name__)
+
+
+class ChatCommands(CommandProvider):
+    """Command provider for chat application commands."""
+
+    async def search(self, query: str) -> Hits:
+        """Search for matching commands."""
+        matcher = self.matcher(query)
+
+        commands = [
+            (
+                "toggle tools",
+                "Toggle Tools Panel",
+                "action_toggle_tools",
+                "Show/hide the tools panel (F2)",
+            ),
+            (
+                "toggle todo panel",
+                "Toggle Todo Panel",
+                "action_toggle_todo_panel",
+                "Show/hide the todo panel (F3)",
+            ),
+            (
+                "toggle todo",
+                "Toggle TODO in Chat",
+                "action_toggle_todo",
+                "Show/hide todos in chat (Ctrl+T)",
+            ),
+            (
+                "copy chat",
+                "Copy Chat Content",
+                "action_copy_chat",
+                "Copy chat content to clipboard (Ctrl+Y)",
+            ),
+            (
+                "clear chat",
+                "Clear Chat",
+                "action_clear_chat",
+                "Clear the chat window (Ctrl+L)",
+            ),
+            (
+                "help",
+                "Show Help",
+                "action_help_panel",
+                "Show help information (Ctrl+?)",
+            ),
+            (
+                "quit",
+                "Quit Application",
+                "action_quit",
+                "Exit the application (Ctrl+C/Q)",
+            ),
+            (
+                "scroll to end",
+                "Scroll to End",
+                "action_scroll_end",
+                "Scroll chat to bottom (End)",
+            ),
+            (
+                "theme toggle",
+                "Toggle Theme",
+                "action_toggle_dark",
+                "Switch between light and dark theme",
+            ),
+        ]
+
+        app = self.app  # Get reference to app
+        assert isinstance(app, ChatApp)  # Type hint for mypy
+
+        for command_text, title, action_name, help_text in commands:
+            score = matcher.match(command_text)
+            if score > 0:
+                # Get the action method from the app
+                action = getattr(app, action_name, None)
+                if action and callable(action):
+                    yield Hit(
+                        score, matcher.highlight(title), partial(action), help=help_text
+                    )
 
 
 class ChatView(RichLog):  # type: ignore[misc]
@@ -96,6 +179,9 @@ class ChatApp(App):  # type: ignore[misc]
     provider: Provider
     engine: AgentEngine
 
+    # Add our custom command provider to the command palette
+    COMMANDS = App.COMMANDS | {ChatCommands}
+
     CSS = """
     Screen {
         layout: vertical;
@@ -106,8 +192,22 @@ class ChatApp(App):  # type: ignore[misc]
         content-align: left middle;
     }
 
+    #content_area {
+        layout: horizontal;
+        height: 1fr;
+        width: 100%;
+    }
+
+    #main_area {
+        layout: vertical;
+        height: 100%;
+        width: 1fr;
+        min-width: 40%;
+    }
+
     #chat {
         height: 1fr;
+        width: 100%;
         overflow-y: auto;
         overflow-x: hidden;
         border: solid $primary;
@@ -115,12 +215,12 @@ class ChatApp(App):  # type: ignore[misc]
         scrollbar-color: $accent;
         scrollbar-corner-color: $panel;
         scrollbar-size: 1 1;
-        text-wrap: wrap; /* ensure wrapping vs horizontal scroll */
-        width: 100%;
+        text-wrap: wrap;
     }
 
     #input {
         dock: bottom;
+        width: 100%;
         margin: 1 0;
         border: solid $accent;
         background: $surface;
@@ -136,6 +236,7 @@ class ChatApp(App):  # type: ignore[misc]
     Input {
         background: $surface;
         color: $text;
+        width: 100%;
     }
 
     .status {
@@ -145,18 +246,22 @@ class ChatApp(App):  # type: ignore[misc]
         color: $text;
         text-align: center;
         padding: 0 1;
+        width: 100%;
     }
 
     #tool_panel {
         display: none;
-        width: 35%;
-        dock: right;
+        width: 30%;
+        height: 100%;
         border: solid $primary;
         background: $surface;
+        min-width: 20%;
+        max-width: 45%;
     }
 
     #tool_panel.visible {
         display: block;
+        width: 30%;
     }
 
     .panel-header {
@@ -166,15 +271,49 @@ class ChatApp(App):  # type: ignore[misc]
         color: $text;
         text-align: center;
         content-align: center middle;
+        width: 100%;
     }
 
     .tool-panel-content {
         height: 100%;
+        width: 100%;
     }
 
     .tool-details {
         dock: bottom;
         height: 50%;
+        width: 100%;
+        border: solid $accent;
+        background: $panel;
+        padding: 1;
+        overflow-y: auto;
+    }
+
+    /* Todo panel styles */
+    #todo_panel {
+        display: none;
+        width: 25%;
+        min-width: 20%;
+        max-width: 40%;
+        height: 100%;
+        border: solid $primary;
+        background: $surface;
+    }
+
+    #todo_panel.visible {
+        display: block;
+        width: 25%;
+    }
+
+    .todo-panel-content {
+        height: 100%;
+        width: 100%;
+    }
+
+    .todo-details {
+        dock: bottom;
+        height: 50%;
+        width: 100%;
         border: solid $accent;
         background: $panel;
         padding: 1;
@@ -183,26 +322,30 @@ class ChatApp(App):  # type: ignore[misc]
 
     #tool_tree {
         height: 1fr;
+        width: 100%;
+        background: $surface;
+    }
+
+    #todo_tree {
+        height: 1fr;
+        width: 100%;
         background: $surface;
     }
     """
 
     BINDINGS = [
-        Binding("ctrl+?", "help_panel", "Help", show=True),
-        Binding("ctrl+t", "toggle_todo", "TODO", show=True),
-        Binding("f2", "toggle_tools", "Tools", show=True),
-        # Core navigation - keep Toad-like simplicity
+        # Keep essential shortcuts that users expect
         Binding("ctrl+c", "quit", "Quit", show=True),
-        Binding("ctrl+q", "quit", "Quit", show=True),
-        Binding("ctrl+d", "quit", "Quit", show=False),
-        # Enhanced text interaction - Toad-inspired
-        Binding("ctrl+y", "copy_chat", "Copy chat", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=False),
+        Binding("ctrl+d", "toggle_dark", "Theme", show=True),
+        # Keep most common actions as shortcuts
+        Binding("f2", "toggle_tools", "Tools", show=True),
+        Binding("ctrl+y", "copy_chat", "Copy", show=True),
         Binding("ctrl+l", "clear_chat", "Clear", show=True),
-        # Enhanced navigation - smooth scrolling like Toad
-        Binding("home", "scroll_home", "Top", show=True),
-        Binding("end", "scroll_end", "Bottom", show=True),
-        Binding("ctrl+home", "scroll_home", "Top", show=False),
-        Binding("ctrl+end", "scroll_end", "Bottom", show=False),
+        # Navigation shortcuts
+        Binding("home", "scroll_home", "Top", show=False),
+        Binding("end", "scroll_end", "Bottom", show=False),
+        # All other commands available via Ctrl+P command palette
     ]
 
     def _apply_provider_config(
@@ -310,6 +453,11 @@ class ChatApp(App):  # type: ignore[misc]
         # Config persistence
         self.config = ConfigManager()
 
+        # Debug file setup
+        self._debug_dir = Path(".textual-debug")
+        self._debug_dir.mkdir(exist_ok=True)
+        self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         # Runtime toggles - load from config with defaults
         self.auto_continue: bool = self.config.get("auto_continue", True)
         self.max_rounds: int = self.config.get("max_rounds", 15)
@@ -325,6 +473,65 @@ class ChatApp(App):  # type: ignore[misc]
 
         # Apply any saved provider config overrides
         self._apply_saved_provider_config()
+
+        # Apply saved theme
+        saved_theme = self.config.get("theme")
+        if saved_theme:
+            self.theme = saved_theme
+
+    def _write_tool_debug(
+        self, tool_id: str, event_type: str, data: Dict[str, Any]
+    ) -> None:
+        """Write detailed tool information to debug JSON file."""
+        try:
+            debug_file = self._debug_dir / f"tools_{self._session_id}.json"
+            timestamp = datetime.now().isoformat()
+
+            debug_entry = {
+                "timestamp": timestamp,
+                "tool_id": tool_id,
+                "event_type": event_type,
+                "data": data,
+            }
+
+            # Append to debug file
+            if debug_file.exists():
+                with open(debug_file, "r") as f:
+                    entries = json.load(f)
+            else:
+                entries = []
+
+            entries.append(debug_entry)
+
+            with open(debug_file, "w") as f:
+                json.dump(entries, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Failed to write tool debug info: {e}")
+
+    def _get_result_summary(self, content: Any) -> str:
+        """Get a brief summary of tool result content."""
+        if isinstance(content, str):
+            if len(content) > 100:
+                return f"{content[:97]}..."
+            return content or "(empty)"
+        elif isinstance(content, dict):
+            if "error" in content:
+                return f"Error: {content.get('error', 'Unknown')}"
+            elif "success" in content:
+                return "Success"
+            else:
+                return f"Dict with {len(content)} keys"
+        elif isinstance(content, list):
+            return f"List with {len(content)} items"
+        else:
+            return str(content)[:100]
+
+    def action_toggle_dark(self) -> None:
+        """Toggle dark/light theme and save preference."""
+        # Let Textual do the theme toggle
+        super().action_toggle_dark()
+        # Save the new theme to config
+        self.config.set("theme", self.theme)
 
     def action_copy_chat(self) -> None:
         """Enhanced copy functionality inspired by Toad's text interaction."""
@@ -376,8 +583,8 @@ class ChatApp(App):  # type: ignore[misc]
             chat.append_block(
                 "[help]\n"
                 "Shortcuts:\n"
-                "  Ctrl+?  Help panel\n"
-                "  Ctrl+T  Toggle TODO panel\n"
+                "  Ctrl+P  Command palette (search all commands)\n"
+                "  Ctrl+D  Toggle theme\n"
                 "  F2      Toggle Tools panel\n"
                 "  Ctrl+Y  Copy chat\n"
                 "  Ctrl+L  Clear chat\n"
@@ -429,6 +636,14 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.error(f"Error toggling tool panel: {e}")
 
+    def action_toggle_todo_panel(self) -> None:
+        """Toggle the todo panel visibility."""
+        try:
+            todo_panel = self.query_one("#todo_panel", TodoPanel)
+            todo_panel.toggle_visibility()
+        except Exception as e:
+            logger.error(f"Error toggling todo panel: {e}")
+
     def _status_title(self) -> str:
         return (
             f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} "
@@ -469,20 +684,32 @@ class ChatApp(App):  # type: ignore[misc]
                 for i, item in enumerate(self._todos, start=1):
                     lines.append(f"{i}. {item}")
             chat.append_block("\n".join(lines))
+
+            # Also update the todo panel if it exists
+            try:
+                todo_panel = self.query_one("#todo_panel", TodoPanel)
+                todo_panel.update_todos(self._todos)
+            except Exception:
+                pass  # Todo panel might not be mounted
         except Exception as e:
             logger.error(f"Error rendering todos: {e}")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="hdr")
-        yield Vertical(
-            ChatView(id="chat"),
-            Input(
-                placeholder="Type a message and press Enter (/help for commands)",
-                id="input",
-                password=False,
+        yield Horizontal(
+            Vertical(
+                ChatView(id="chat"),
+                Input(
+                    placeholder="Type a message and press Enter (/help for commands)",
+                    id="input",
+                    password=False,
+                ),
+                id="main_area",
             ),
+            ToolPanel(),
+            TodoPanel(),
+            id="content_area",
         )
-        yield ToolPanel()
         yield Static("Idle", id="status_bar", classes="status")
         yield Footer(id="footer")
 
@@ -592,40 +819,31 @@ class ChatApp(App):  # type: ignore[misc]
                             except Exception:
                                 pass  # Tool panel might not be mounted
 
-                        # Render call with explicit id for mapping clarity
-                        chat.append_block(
-                            f"[tool call]\nid: {tool_id}\nname: {tool_name}\nargs: {tool_args}"
-                        )
+                            # Write detailed info to debug file
+                            self._write_tool_debug(
+                                tool_id,
+                                "call",
+                                {"name": tool_name, "arguments": tool_args},
+                            )
+
+                        # Display simple clickable version in chat
+                        # Using a simple format that can be clicked to show in tool panel
+                        chat.write(f"🔧 {tool_name} called", style="link blue")
+                        chat.write("\n")
                     elif ctype == "tool_result":
                         content = chunk.get("content", "")
                         tool_id = chunk.get("id", "")
-                        header = "[tool result]"
-                        if tool_id and tool_id in self._tool_calls_by_id:
-                            meta = self._tool_calls_by_id[tool_id]
-                            # If call not yet shown (rare), print it now before result
-                            if tool_id not in self._displayed_tool_calls:
-                                chat.append_block(
-                                    f"[tool call]\nid: {tool_id}\nname: {meta.get('name')}\nargs: {meta.get('arguments')}"
-                                )
-                                self._displayed_tool_calls.add(tool_id)
-                            header = (
-                                "[tool]\n"
-                                f"id: {tool_id}\n"
-                                f"name: {meta.get('name')}\n"
-                                f"args: {meta.get('arguments')}\n"
-                                "output:"
+
+                        # Write detailed result to debug file
+                        if tool_id:
+                            self._write_tool_debug(
+                                tool_id, "result", {"content": content}
                             )
-                        try:
-                            parsed = json.loads(content)
-                            content = json.dumps(parsed, indent=2, ensure_ascii=False)
-                        except Exception:
-                            pass
-                        max_display = 8000
-                        display = (
-                            str(content)[:max_display] + "\n... (truncated in view)"
-                            if len(str(content)) > max_display
-                            else str(content)
-                        )
+
+                        # Display simple result indicator in chat
+                        result_summary = self._get_result_summary(content)
+                        chat.write(f"✅ Result: {result_summary}", style="green dim")
+                        chat.write("\n")
 
                         # Update tool panel with result
                         if tool_id:
@@ -634,9 +852,6 @@ class ChatApp(App):  # type: ignore[misc]
                                 tool_panel.update_tool_result(tool_id, result=content)
                             except Exception:
                                 pass  # Tool panel might not be mounted
-
-                        chat.append_block(f"{header}\n{display}")
-                        chat.append_hr()
                     elif ctype == "append_message":
                         message = chunk.get("message", {})
                         if message:

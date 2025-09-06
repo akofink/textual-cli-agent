@@ -133,6 +133,10 @@ class ToolPanel(Container):
         else:
             self.remove_class("visible")
 
+        # Force layout refresh
+        if self.app:
+            self.app.refresh(layout=True)
+
     def start_turn(self, turn_id: int) -> None:
         """Start a new conversation turn."""
         self.current_turn = ToolTurn(turn_id=turn_id)

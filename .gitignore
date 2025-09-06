@@ -40,3 +40,6 @@ htmlcov/
 
 # Chat exports (created by enhanced copy functionality)
 chat_export*.txt
+
+# Tool debug files (JSON format for detailed debugging)
+.textual-debug/
