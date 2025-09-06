@@ -264,8 +264,12 @@ class ChatApp(App):  # type: ignore[misc]
                     if ctype == "text":
                         delta = chunk.get("delta", "")
                         if delta:
-                            # Buffer text to avoid excessive newlines / fragmentation
-                            text_buf += delta
+                            # Surface errors immediately for visibility & tests
+                            if "[ERROR]" in delta:
+                                chat.append_text(delta)
+                            else:
+                                # Buffer non-error text to avoid fragmentation
+                                text_buf += delta
                     elif ctype == "tool_call":
                         tool_name = chunk.get("name", "unknown_tool")
                         tool_args = chunk.get("arguments", {})
@@ -327,7 +331,7 @@ class ChatApp(App):  # type: ignore[misc]
                     elif ctype == "round_complete":
                         # Flush any buffered text once at end of turn
                         if text_buf:
-                            chat.append_text(text_buf)
+                            chat.append_block(text_buf)
                             text_buf = ""
                         chat.append_hr()
                         had_tools_this_round = bool(chunk.get("had_tool_calls", False))
