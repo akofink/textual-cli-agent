@@ -286,6 +286,33 @@ class ChatApp(App):  # type: ignore[misc]
         self._todos: List[str] = []
         self._show_todo: bool = False
 
+    def _status_title(self) -> str:
+        return (
+            f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} "
+            f"model={self.provider.cfg.model} temp={self.provider.cfg.temperature} "
+            f"auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"
+        )
+
+    def _refresh_header(self) -> None:
+        try:
+            self.query_one("#hdr", Header).sub_title = self._status_title()
+        except Exception:
+            pass
+
+    def _render_todos(self, chat: "ChatView") -> None:
+        try:
+            if not self._show_todo:
+                return
+            lines = ["[todo]"]
+            if not self._todos:
+                lines.append("(empty)")
+            else:
+                for i, item in enumerate(self._todos, start=1):
+                    lines.append(f"{i}. {item}")
+            chat.append_block("\n".join(lines))
+        except Exception as e:
+            logger.error(f"Error rendering todos: {e}")
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="hdr")
         yield Vertical(
@@ -323,8 +350,7 @@ class ChatApp(App):  # type: ignore[misc]
     def on_mount(self) -> None:
         # Update header title with live status
         try:
-            title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds}"
-            self.query_one("#hdr", Header).sub_title = title
+            self._refresh_header()
         except Exception:
             pass
         if self._initial_markdown:
@@ -379,9 +405,10 @@ class ChatApp(App):  # type: ignore[misc]
                                 "name": tool_name,
                                 "arguments": tool_args,
                             }
-                        # Buffer tool call; render before its result
+                            self._displayed_tool_calls.add(tool_id)
+                        # Render call with explicit id for mapping clarity
                         chat.append_block(
-                            f"[tool call]\nname: {tool_name}\nargs: {tool_args}"
+                            f"[tool call]\nid: {tool_id}\nname: {tool_name}\nargs: {tool_args}"
                         )
                     elif ctype == "tool_result":
                         content = chunk.get("content", "")
@@ -389,8 +416,15 @@ class ChatApp(App):  # type: ignore[misc]
                         header = "[tool result]"
                         if tool_id and tool_id in self._tool_calls_by_id:
                             meta = self._tool_calls_by_id[tool_id]
+                            # If call not yet shown (rare), print it now before result
+                            if tool_id not in self._displayed_tool_calls:
+                                chat.append_block(
+                                    f"[tool call]\nid: {tool_id}\nname: {meta.get('name')}\nargs: {meta.get('arguments')}"
+                                )
+                                self._displayed_tool_calls.add(tool_id)
                             header = (
                                 "[tool]\n"
+                                f"id: {tool_id}\n"
                                 f"name: {meta.get('name')}\n"
                                 f"args: {meta.get('arguments')}\n"
                                 "output:"
@@ -466,6 +500,182 @@ class ChatApp(App):  # type: ignore[misc]
                 chat.append_block(f"[error] {msg}")
 
             if cmd == "/help":
+                ok(
+                    "Commands:\n"
+                    "/help\n"
+                    "/model <name>\n"
+                    "/provider <openai|anthropic>\n"
+                    "/temp <float>\n"
+                    "/system <text>\n"
+                    "/auto <on|off>\n"
+                    "/rounds <n>\n"
+                    "/parallel <on|off>\n"
+                    "/parallel limit <n>\n"
+                    "/timeout <seconds>\n"
+                    "/tools\n"
+                    "/tools enable <name>\n"
+                    "/tools disable <name>\n"
+                    "/todo add <item>\n"
+                    "/todo remove <n>\n"
+                    "/todo show|hide\n"
+                )
+                return True
+            if cmd == "/model" and args:
+                self._apply_provider_config(model=" ".join(args))
+                self._refresh_header()
+                ok(f"model set -> {' '.join(args)}")
+                return True
+            if cmd == "/provider" and args:
+                prov = args[0].lower()
+                if prov not in ("openai", "anthropic"):
+                    err("provider must be 'openai' or 'anthropic'")
+                    return True
+                try:
+                    cfg = ProviderConfig(
+                        model=self.provider.cfg.model,
+                        api_key=self.provider.cfg.api_key,
+                        base_url=self.provider.cfg.base_url,
+                        temperature=self.provider.cfg.temperature,
+                        system_prompt=self.provider.cfg.system_prompt,
+                    )
+                    new_provider = ProviderFactory.create(prov, cfg)
+                    self.provider = new_provider
+                    self.engine.provider = new_provider
+                    self._refresh_header()
+                    ok(f"provider -> {prov}")
+                except Exception as e:
+                    err(f"failed to switch provider: {str(e)}")
+                return True
+            if cmd == "/temp" and args:
+                try:
+                    t = float(args[0])
+                except Exception:
+                    err("temp must be a float")
+                    return True
+                self._apply_provider_config(temperature=t)
+                self._refresh_header()
+                ok(f"temperature set -> {t}")
+                return True
+            if cmd == "/system" and args:
+                text = " ".join(args)
+                self._apply_provider_config(system=text)
+                self._refresh_header()
+                ok("system prompt updated")
+                return True
+            if cmd == "/auto" and args:
+                val = args[0].lower()
+                self.auto_continue = val in ("on", "true", "1", "yes")
+                self._refresh_header()
+                ok(f"auto-continue -> {self.auto_continue}")
+                return True
+            if cmd == "/rounds" and args:
+                try:
+                    n = int(args[0])
+                except Exception:
+                    err("rounds must be an integer")
+                    return True
+                self.max_rounds = max(1, n)
+                self._refresh_header()
+                ok(f"max rounds -> {self.max_rounds}")
+                return True
+            if cmd == "/parallel" and args:
+                if args[0] == "limit" and len(args) > 1:
+                    try:
+                        n = int(args[1])
+                    except Exception:
+                        err("parallel limit must be an integer")
+                        return True
+                    self.engine.concurrency_limit = max(1, n)
+                    self._refresh_header()
+                    ok(f"concurrency limit -> {self.engine.concurrency_limit}")
+                    return True
+                else:
+                    val = args[0].lower()
+                    if val in ("on", "off"):
+                        # 'on' removes limit; 'off' sets to 1
+                        self.engine.concurrency_limit = None if val == "on" else 1
+                        self._refresh_header()
+                        ok(f"parallel -> {val}")
+                        return True
+            if cmd == "/timeout" and args:
+                try:
+                    secs = float(args[0])
+                except Exception:
+                    err("timeout must be a number (seconds)")
+                    return True
+                self.engine.tool_timeout = max(1.0, secs)
+                self._refresh_header()
+                ok(f"tool timeout -> {self.engine.tool_timeout}s")
+                return True
+            if cmd == "/tools":
+                names = [
+                    t.get("name", "")
+                    for t in self.engine._combined_tool_specs()
+                    if t.get("name") is not None
+                ]
+                if self.engine.enabled_tools is None:
+                    enabled = set(names)
+                else:
+                    enabled = set(self.engine.enabled_tools)
+                lines = ["Tools:"] + [
+                    ("* " if n in enabled else "  ") + n for n in names
+                ]
+                chat.append_block("\n".join(lines))
+                return True
+            if cmd == "/tools" and len(args) >= 2:
+                sub = args[0].lower()
+                name = " ".join(args[1:])
+                if sub == "enable":
+                    if self.engine.enabled_tools is None:
+                        self.engine.enabled_tools = set()
+                    self.engine.enabled_tools.add(name)
+                    self._refresh_header()
+                    ok(f"enabled tool -> {name}")
+                    return True
+                if sub == "disable":
+                    if self.engine.enabled_tools is None:
+                        # initialize to all tools then remove
+                        self.engine.enabled_tools = set(
+                            n
+                            for n in (
+                                t.get("name")
+                                for t in self.engine._combined_tool_specs()
+                            )
+                            if n is not None
+                        )
+                    self.engine.enabled_tools.discard(name)
+                    self._refresh_header()
+                    ok(f"disabled tool -> {name}")
+                    return True
+            if cmd == "/todo" and args:
+                sub = args[0].lower()
+                if sub == "add" and len(args) > 1:
+                    item = " ".join(args[1:])
+                    self._todos.append(item)
+                    ok(f"todo added -> {item}")
+                    if self._show_todo:
+                        self._render_todos(chat)
+                    return True
+                if sub == "remove" and len(args) > 1:
+                    try:
+                        idx = int(args[1]) - 1
+                        if 0 <= idx < len(self._todos):
+                            removed = self._todos.pop(idx)
+                            ok(f"todo removed -> {removed}")
+                            if self._show_todo:
+                                self._render_todos(chat)
+                        else:
+                            err("index out of range")
+                    except Exception:
+                        err("usage: /todo remove <n>")
+                    return True
+                if sub in ("show", "hide"):
+                    self._show_todo = sub == "show"
+                    self._render_todos(chat)
+                    ok(f"todo -> {sub}")
+                    return True
+                err("usage: /todo add <item> | /todo remove <n> | /todo show|hide")
+                return True
                 ok(
                     "Commands:\n"
                     "/help\n"
