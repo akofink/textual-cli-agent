@@ -99,7 +99,7 @@ The codebase maintains **58% test coverage** with focus on error handling scenar
 ## Configuration Files
 
 - **pyproject.toml**: Project dependencies, scripts, tool configuration, coverage settings
-- **.pre-commit-config.yaml**: Automated quality checks (ruff, black, mypy, pytest)
+- **.pre-commit-config.yaml**: Automated quality checks (ruff, mypy, pytest)
 - **uv.lock**: Dependency lockfile for reproducible environments
 
 ## Quality Standards

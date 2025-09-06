@@ -16,7 +16,7 @@ This project maintains high code quality through:
 - **Pre-commit hooks**: Automatic formatting and linting on commit
 - **Type checking**: Full mypy coverage with strict type checking
 - **Test coverage**: 58% coverage with defensive error handling tests
-- **Formatting**: Consistent code style with ruff and black
+- **Formatting**: Consistent code style with Ruff (formatter enabled)
 
 ## Running checks
 
@@ -24,7 +24,7 @@ This project maintains high code quality through:
 # Linting and formatting
 uv run ruff check .
 uv run ruff format --check .
-uv run black --check .
+uv run ruff format --check .
 
 # Type checking
 uv run mypy .
