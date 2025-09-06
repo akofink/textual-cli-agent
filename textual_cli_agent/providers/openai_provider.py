@@ -7,6 +7,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Set
 from openai import AsyncOpenAI
 
 from .base import Provider, ProviderConfig, ToolSpec
+from ..error_handler import api_error_handler
+from ..context_manager import context_manager
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +42,27 @@ class OpenAIProvider(Provider):
     async def completions_stream(
         self, messages: List[Dict[str, Any]], tools: Optional[List[ToolSpec]] = None
     ) -> AsyncIterator[Dict[str, Any]]:
+        async for chunk in self._completions_stream_with_retry(messages, tools):
+            yield chunk
+
+    async def _completions_stream_with_retry(
+        self,
+        original_messages: List[Dict[str, Any]],
+        tools: Optional[List[ToolSpec]] = None,
+        retry_count: int = 0,
+    ) -> AsyncIterator[Dict[str, Any]]:
         try:
             tool_schema = await self.list_tools_format(tools or []) if tools else None
+
+            # Use original messages or pruned version
+            msgs = list(original_messages)
+
             # Prepend system prompt if provided and not already present
-            msgs = list(messages)
             if self.cfg.system_prompt and not any(
                 m.get("role") == "system" for m in msgs
             ):
                 msgs = [{"role": "system", "content": self.cfg.system_prompt}] + msgs
+
             params: Dict[str, Any] = {
                 "model": self.cfg.model,
                 "messages": msgs,
@@ -62,6 +77,49 @@ class OpenAIProvider(Provider):
                 stream = await self.client.chat.completions.create(**params)
             except Exception as e:
                 logger.error(f"OpenAI API call failed: {e}")
+
+                # Intelligent error handling
+                if api_error_handler.should_prune_context(e):
+                    if retry_count < 2:  # Limit retries to prevent infinite loops
+                        pruned_messages = context_manager.adaptive_prune_with_summary(
+                            original_messages, str(e)
+                        )
+                        recovery_msg = api_error_handler.get_recovery_message(e)
+                        yield {"type": "text", "delta": f"[RECOVERY] {recovery_msg}"}
+
+                        # Retry with pruned context
+                        async for chunk in self._completions_stream_with_retry(
+                            pruned_messages, tools, retry_count + 1
+                        ):
+                            yield chunk
+                        return
+
+                # For rate limits and other retryable errors, use the error handler
+                try:
+                    analysis = api_error_handler.analyze_error(e)
+                    if (
+                        analysis.is_recoverable
+                        and analysis.should_retry
+                        and retry_count == 0
+                    ):
+                        recovery_msg = api_error_handler.get_recovery_message(e)
+                        yield {"type": "text", "delta": f"[RECOVERY] {recovery_msg}"}
+
+                        # Use the error handler's retry logic
+                        async for chunk in api_error_handler.handle_error_with_retry(
+                            e,
+                            f"openai_stream_{id(original_messages)}",
+                            self._completions_stream_with_retry,
+                            original_messages,
+                            tools,
+                            retry_count + 1,
+                        ):
+                            yield chunk
+                        return
+                except Exception:
+                    # If error handling fails, fall back to original error
+                    pass
+
                 yield {"type": "text", "delta": f"[ERROR] API call failed: {str(e)}"}
                 return
 
