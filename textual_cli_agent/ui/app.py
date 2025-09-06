@@ -94,75 +94,6 @@ class ChatApp(App):  # type: ignore[misc]
     provider: Provider
     engine: AgentEngine
 
-    def action_copy_chat(self) -> None:
-        """Enhanced copy functionality inspired by Toad's text interaction."""
-        try:
-            import pyperclip  # type: ignore
-        except Exception:
-            pyperclip = None  # type: ignore
-
-        try:
-            chat = self.query_one("#chat", ChatView)
-            text = chat.get_text()
-
-            # Show visual feedback like Toad
-            if not text.strip():
-                self.bell()  # Audio feedback for empty content
-                return
-
-        except Exception as e:
-            logger.error(f"Error getting chat text: {e}")
-            self.bell()  # Audio feedback for error
-            return
-
-        success = False
-        if pyperclip:
-            try:
-                pyperclip.copy(text)  # type: ignore[attr-defined]
-                success = True
-                # Visual feedback - could add a toast notification here
-            except Exception:
-                pass
-
-        # Enhanced fallback: write to a file with better naming
-        if not success:
-            try:
-                from datetime import datetime
-
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"chat_export_{timestamp}.txt"
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(text)
-                # Could log success to chat view here
-            except Exception as e:
-                logger.error(f"Error writing chat export file: {e}")
-                self.bell()  # Audio feedback for error
-
-    def action_clear_chat(self) -> None:
-        """Clear chat history - Toad-inspired quick action."""
-        try:
-            chat = self.query_one("#chat", ChatView)
-            chat.clear()
-            chat._current_text = ""
-        except Exception as e:
-            logger.error(f"Error clearing chat: {e}")
-
-    def action_scroll_home(self) -> None:
-        """Scroll to top of chat - enhanced navigation."""
-        try:
-            chat = self.query_one("#chat", ChatView)
-            chat.scroll_home(animate=True)
-        except Exception as e:
-            logger.error(f"Error scrolling to home: {e}")
-
-    def action_scroll_end(self) -> None:
-        """Scroll to bottom of chat - enhanced navigation."""
-        try:
-            chat = self.query_one("#chat", ChatView)
-            chat.scroll_end(animate=True)
-        except Exception as e:
-            logger.error(f"Error scrolling to end: {e}")
-
     CSS = """
     Screen {
         layout: vertical;
@@ -207,6 +138,8 @@ class ChatApp(App):  # type: ignore[misc]
     """
 
     BINDINGS = [
+        Binding("ctrl+?", "help_panel", "Help", show=True),
+        Binding("ctrl+t", "toggle_todo", "TODO", show=True),
         # Core navigation - keep Toad-like simplicity
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
@@ -286,6 +219,99 @@ class ChatApp(App):  # type: ignore[misc]
         self._todos: List[str] = []
         self._show_todo: bool = False
 
+    def action_copy_chat(self) -> None:
+        """Enhanced copy functionality inspired by Toad's text interaction."""
+        try:
+            import pyperclip  # type: ignore
+        except Exception:
+            pyperclip = None  # type: ignore
+
+        try:
+            chat = self.query_one("#chat", ChatView)
+            text = chat.get_text()
+
+            # Show visual feedback like Toad
+            if not text.strip():
+                self.bell()  # Audio feedback for empty content
+                return
+
+        except Exception as e:
+            logger.error(f"Error getting chat text: {e}")
+            self.bell()  # Audio feedback for error
+            return
+
+        success = False
+        if pyperclip:
+            try:
+                pyperclip.copy(text)  # type: ignore[attr-defined]
+                success = True
+                # Visual feedback - could add a toast notification here
+            except Exception:
+                pass
+
+        # Enhanced fallback: write to a file with better naming
+        if not success:
+            try:
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"chat_export_{timestamp}.txt"
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(text)
+                # Could log success to chat view here
+            except Exception as e:
+                logger.error(f"Error writing chat export file: {e}")
+                self.bell()  # Audio feedback for error
+
+    def action_help_panel(self) -> None:
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.append_block(
+                "[help]\n"
+                "Shortcuts:\n"
+                "  Ctrl+?  Help panel\n"
+                "  Ctrl+T  Toggle TODO panel\n"
+                "  Ctrl+Y  Copy chat\n"
+                "  Ctrl+L  Clear chat\n"
+                "  Home/End Scroll\n"
+                "Commands: type /help for full list"
+            )
+        except Exception as e:
+            logger.error(f"Error showing help panel: {e}")
+
+    def action_toggle_todo(self) -> None:
+        try:
+            self._show_todo = not self._show_todo
+            chat = self.query_one("#chat", ChatView)
+            self._render_todos(chat)
+        except Exception as e:
+            logger.error(f"Error toggling TODO panel: {e}")
+
+    def action_clear_chat(self) -> None:
+        """Clear chat history - Toad-inspired quick action."""
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.clear()
+            chat._current_text = ""
+        except Exception as e:
+            logger.error(f"Error clearing chat: {e}")
+
+    def action_scroll_home(self) -> None:
+        """Scroll to top of chat - enhanced navigation."""
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.scroll_home(animate=True)
+        except Exception as e:
+            logger.error(f"Error scrolling to home: {e}")
+
+    def action_scroll_end(self) -> None:
+        """Scroll to bottom of chat - enhanced navigation."""
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.scroll_end(animate=True)
+        except Exception as e:
+            logger.error(f"Error scrolling to end: {e}")
+
     def _status_title(self) -> str:
         return (
             f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} "
@@ -295,7 +321,7 @@ class ChatApp(App):  # type: ignore[misc]
 
     def _refresh_header(self) -> None:
         try:
-            self.query_one("#hdr", Header).sub_title = self._status_title()
+            self.sub_title = self._status_title()
         except Exception:
             pass
 
@@ -343,7 +369,7 @@ class ChatApp(App):  # type: ignore[misc]
                 # Update header subtitle with pending
                 try:
                     title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"
-                    self.query_one("#hdr", Header).sub_title = title
+                    self.sub_title = title
                 except Exception:
                     pass
 
@@ -379,7 +405,7 @@ class ChatApp(App):  # type: ignore[misc]
             text_buf = ""
             # Show working indicator
             try:
-                self.query_one("#hdr", Header).sub_title = "Working..."
+                self.sub_title = "Working..."
             except Exception:
                 pass
             async for chunk in self.engine.run_stream(self.messages):
@@ -481,7 +507,7 @@ class ChatApp(App):  # type: ignore[misc]
             # Restore header subtitle to status between rounds
             try:
                 title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds}"
-                self.query_one("#hdr", Header).sub_title = title
+                self.sub_title = title
             except Exception:
                 pass
 
@@ -856,7 +882,7 @@ class ChatApp(App):  # type: ignore[misc]
                 await self._run_auto_rounds(chat)
             try:
                 title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"
-                self.query_one("#hdr", Header).sub_title = title
+                self.sub_title = title
             except Exception:
                 pass
             except Exception as e:

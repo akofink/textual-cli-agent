@@ -25,6 +25,13 @@ import httpx
 
 from pydantic import BaseModel, Field
 from .providers.base import ToolSpec
+from .todo_store import (
+    list_todos as _list_todos,
+    add_todo as _add_todo,
+    remove_todo as _remove_todo,
+    set_todo as _set_todo,
+)
+
 
 R = TypeVar("R")
 ToolFunc = Callable[..., Union[R, Coroutine[Any, Any, R]]]
@@ -126,6 +133,30 @@ def load_tools_from_modules(modules: List[str]) -> List[RegisteredTool]:
 
 
 # -------------------- Built-in Tools --------------------
+
+# TODO Tools so the AI can manage TODO list
+
+
+@tool(description="List TODO items.")
+async def todo_list() -> List[str]:
+    return await _list_todos()
+
+
+@tool(description="Add a TODO item.")
+async def todo_add(item: str) -> str:
+    await _add_todo(item)
+    return item
+
+
+@tool(description="Remove a TODO item by 1-based index.")
+async def todo_remove(index: int) -> bool:
+    # Accept 1-based index in tool
+    return await _remove_todo(max(0, index - 1))
+
+
+@tool(description="Edit a TODO item by 1-based index.")
+async def todo_edit(index: int, item: str) -> bool:
+    return await _set_todo(max(0, index - 1), item)
 
 
 class ParallelTask(BaseModel):
