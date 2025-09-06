@@ -23,7 +23,7 @@ import glob
 
 import httpx
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from .providers.base import ToolSpec
 
 R = TypeVar("R")
@@ -126,6 +126,28 @@ def load_tools_from_modules(modules: List[str]) -> List[RegisteredTool]:
 
 
 # -------------------- Built-in Tools --------------------
+
+
+class ParallelTask(BaseModel):
+    tool: str = Field(..., description="Tool name to run")
+    arguments: Dict[str, Any] = Field(
+        default_factory=dict, description="Arguments for the tool"
+    )
+
+
+@tool(
+    description="Run multiple tools in parallel. Input: list of {tool, arguments}. Returns list of results in order."
+)
+async def parallel_run(tasks: List[ParallelTask]) -> List[Any]:
+    async def run_one(t: ParallelTask) -> Any:
+        try:
+            return await execute_tool(t.tool, dict(t.arguments))
+        except Exception as e:
+            return {"error": str(e)}
+
+    # schedule concurrently
+    coros = [run_one(t) for t in tasks]
+    return await asyncio.gather(*coros, return_exceptions=False)
 
 
 @tool(description="HTTP GET a URL and return text content. Optional timeout seconds.")

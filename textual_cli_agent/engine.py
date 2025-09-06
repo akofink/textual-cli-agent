@@ -59,6 +59,8 @@ class AgentEngine:
             assistant_text_parts: List[str] = []
             tool_calls: List[Dict[str, Any]] = []
             pending_tool_messages: List[Dict[str, Any]] = []
+            # collect tool calls to execute concurrently at end
+            scheduled_tools: List[Dict[str, Any]] = []
             had_tool_calls = False
 
             try:
@@ -84,41 +86,12 @@ class AgentEngine:
                             args = chunk.get("arguments", {})
                             tool_call_id = chunk.get("id", f"call_{len(tool_calls)}")
 
-                            # Execute tool with comprehensive error handling
-                            result = await self._execute_tool_safely(name, args)
-
-                            try:
-                                result_str = json.dumps(result, ensure_ascii=False)
-                            except (TypeError, ValueError) as e:
-                                logger.error(f"Error serializing tool result: {e}")
-                                result_str = json.dumps(
-                                    {"error": f"Result serialization failed: {str(e)}"}
-                                )
-
-                            # Prepare provider-formatted tool result message to append AFTER assistant tool_calls
-                            try:
-                                tool_msg = self.provider.format_tool_result_message(
-                                    tool_call_id, result_str
-                                )
-                                pending_tool_messages.append(tool_msg)
-                            except Exception as e:
-                                logger.error(
-                                    f"Error formatting tool result message: {e}"
-                                )
-                                # Fallback message format with required tool_call_id
-                                fallback_msg = {
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "content": result_str,
-                                }
-                                pending_tool_messages.append(fallback_msg)
-
-                            # Also surface to UI (does not affect provider message ordering)
-                            yield {
-                                "type": "tool_result",
+                            # Schedule tool for concurrent execution; don't await inline
+                            scheduled_tools.append({
                                 "id": tool_call_id,
-                                "content": result_str,
-                            }
+                                "name": name,
+                                "arguments": args,
+                            })
                     except Exception as e:
                         logger.error(f"Error processing chunk {chunk}: {e}")
                         yield {
@@ -134,7 +107,45 @@ class AgentEngine:
                     "delta": f"[ERROR] Provider stream failed: {str(e)}",
                 }
 
-            # After stream ends, append assistant message with accumulated text and tool-calls (metadata)
+            # Execute any scheduled tools concurrently, then build tool result messages
+            if scheduled_tools:
+                try:
+                    results = await asyncio.gather(
+                        *[
+                            self._execute_tool_safely(t["name"], t["arguments"])
+                            for t in scheduled_tools
+                        ],
+                        return_exceptions=False,
+                    )
+                    for t, res in zip(scheduled_tools, results):
+                        try:
+                            result_str = json.dumps(res, ensure_ascii=False)
+                        except (TypeError, ValueError) as e:
+                            logger.error(f"Error serializing tool result: {e}")
+                            result_str = json.dumps({
+                                "error": f"Result serialization failed: {str(e)}"
+                            })
+                        try:
+                            tool_msg = self.provider.format_tool_result_message(
+                                t["id"], result_str
+                            )
+                            pending_tool_messages.append(tool_msg)
+                        except Exception:
+                            pending_tool_messages.append({
+                                "role": "tool",
+                                "tool_call_id": t["id"],
+                                "content": result_str,
+                            })
+                        # Also surface to UI (does not affect provider message ordering)
+                        yield {
+                            "type": "tool_result",
+                            "id": t["id"],
+                            "content": result_str,
+                        }
+                except Exception as e:
+                    logger.error(f"Error executing scheduled tools: {e}")
+
+            # After tools (if any), append assistant message with accumulated text and tool-calls (metadata)
             try:
                 final_text = "".join(assistant_text_parts)
                 assistant_msg = self.provider.build_assistant_message(

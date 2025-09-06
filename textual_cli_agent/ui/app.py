@@ -171,6 +171,7 @@ class ChatApp(App):  # type: ignore[misc]
         scrollbar-corner-color: $panel;
         scrollbar-size: 1 1;
         text-wrap: wrap; /* ensure wrapping vs horizontal scroll */
+        width: 96%; /* slightly narrower to prevent 1-char overflow in some terminals */
     }
 
     #input {
@@ -227,6 +228,8 @@ class ChatApp(App):  # type: ignore[misc]
         self.engine = AgentEngine(provider, mcp_manager)
         self.messages: List[Dict[str, Any]] = list(initial_messages or [])
         self._initial_markdown = initial_markdown or ""
+        # Track tool calls by id to enhance result display
+        self._tool_calls_by_id: Dict[str, Dict[str, Any]] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -245,6 +248,88 @@ class ChatApp(App):  # type: ignore[misc]
                 chat.append_block(self._initial_markdown)
             except Exception as e:
                 logger.error(f"Error displaying initial markdown: {e}")
+
+    async def _run_auto_rounds(self, chat: "ChatView") -> None:
+        max_rounds = 6
+        rounds = 0
+        while True:
+            had_tools_this_round = False
+            async for chunk in self.engine.run_stream(self.messages):
+                try:
+                    ctype = chunk.get("type")
+                    if ctype == "text":
+                        delta = chunk.get("delta", "")
+                        if delta:
+                            chat.append_text(delta)
+                    elif ctype == "tool_call":
+                        tool_name = chunk.get("name", "unknown_tool")
+                        tool_args = chunk.get("arguments", {})
+                        tool_id = chunk.get("id", "")
+                        if tool_id:
+                            self._tool_calls_by_id[tool_id] = {
+                                "name": tool_name,
+                                "arguments": tool_args,
+                            }
+                        chat.append_block(
+                            f"[tool call]\nname: {tool_name}\nargs: {tool_args}"
+                        )
+                    elif ctype == "tool_result":
+                        content = chunk.get("content", "")
+                        tool_id = chunk.get("id", "")
+                        header = "[tool result]"
+                        if tool_id and tool_id in self._tool_calls_by_id:
+                            meta = self._tool_calls_by_id[tool_id]
+                            header = (
+                                "[tool]\n"
+                                f"name: {meta.get('name')}\n"
+                                f"args: {meta.get('arguments')}\n"
+                                "output:"
+                            )
+                        try:
+                            parsed = json.loads(content)
+                            content = json.dumps(parsed, indent=2, ensure_ascii=False)
+                        except Exception:
+                            pass
+                        max_display = 8000
+                        display = (
+                            str(content)[:max_display] + "\n... (truncated in view)"
+                            if len(str(content)) > max_display
+                            else str(content)
+                        )
+                        chat.append_block(f"{header}\n{display}")
+                        chat.append_hr()
+                    elif ctype == "append_message":
+                        message = chunk.get("message", {})
+                        if message:
+                            if message.get("role") == "assistant" and message.get(
+                                "tool_calls"
+                            ):
+                                calls = message.get("tool_calls") or []
+                                pretty_calls = [
+                                    {
+                                        "id": c.get("id"),
+                                        "name": (c.get("function") or {}).get("name"),
+                                        "arguments": (c.get("function") or {}).get(
+                                            "arguments"
+                                        ),
+                                    }
+                                    for c in calls
+                                ]
+                                chat.append_block(
+                                    f"[assistant tool_calls]\n{pretty_calls}"
+                                )
+                            self.messages.append(message)
+                    elif ctype == "round_complete":
+                        chat.append_hr()
+                        had_tools_this_round = bool(chunk.get("had_tool_calls", False))
+                        break
+                except Exception as e:
+                    logger.error(f"Error processing chunk {chunk}: {e}")
+                    chat.append_text(f"[ERROR] Processing error: {str(e)}")
+                    continue
+            rounds += 1
+            if not had_tools_this_round or rounds >= max_rounds:
+                break
 
     async def on_input_submitted(self, event: Any) -> None:
         try:
@@ -267,55 +352,7 @@ class ChatApp(App):  # type: ignore[misc]
             self.messages.append({"role": "user", "content": prompt})
 
             try:
-                async for chunk in self.engine.run_stream(self.messages):
-                    try:
-                        ctype = chunk.get("type")
-                        if ctype == "text":
-                            delta = chunk.get("delta", "")
-                            if delta:  # Only append non-empty deltas
-                                chat.append_text(
-                                    delta
-                                )  # stream text with no extra spacing
-                        elif ctype == "tool_call":
-                            tool_name = chunk.get("name", "unknown_tool")
-                            tool_args = chunk.get("arguments", {})
-                            chat.append_block(f"[tool call] {tool_name}({tool_args})")
-                        elif ctype == "tool_result":
-                            content = chunk.get("content", "")
-                            try:
-                                # Pretty-print JSON where possible
-                                parsed = json.loads(content)
-                                pretty = json.dumps(
-                                    parsed, indent=2, ensure_ascii=False
-                                )
-                                content = pretty
-                            except Exception:
-                                # If not JSON, keep as-is
-                                pass
-                            # Truncate extremely large outputs for display only
-                            max_display = 8000
-                            if len(str(content)) > max_display:
-                                display = (
-                                    str(content)[:max_display]
-                                    + "\n... (truncated in view)"
-                                )
-                            else:
-                                display = str(content)
-                            chat.append_block(f"[tool result]\n{display}")
-                            chat.append_hr()
-                        elif ctype == "append_message":
-                            # Engine is asking us to append a message to conversation to maintain correct provider format
-                            message = chunk.get("message", {})
-                            if message:
-                                self.messages.append(message)
-                        elif ctype == "round_complete":
-                            # Add a clear separator before the assistant's final text
-                            chat.append_hr()
-                            break
-                    except Exception as e:
-                        logger.error(f"Error processing chunk {chunk}: {e}")
-                        chat.append_text(f"[ERROR] Processing error: {str(e)}")
-                        continue
+                await self._run_auto_rounds(chat)
             except Exception as e:
                 logger.error(f"Error during stream processing: {e}")
                 chat.append_block(f"**[ERROR]** Stream processing failed: {str(e)}")

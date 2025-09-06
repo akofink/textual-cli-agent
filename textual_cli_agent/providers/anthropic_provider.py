@@ -159,14 +159,12 @@ class AnthropicProvider(Provider):
         if text:
             content.append({"type": "text", "text": text})
         for tc in tool_calls:
-            content.append(
-                {
-                    "type": "tool_use",
-                    "id": tc["id"],
-                    "name": tc["name"],
-                    "input": tc.get("arguments", {}),
-                }
-            )
+            content.append({
+                "type": "tool_use",
+                "id": tc["id"],
+                "name": tc["name"],
+                "input": tc.get("arguments", {}),
+            })
         return {"role": "assistant", "content": content}
 
     def format_tool_result_message(
