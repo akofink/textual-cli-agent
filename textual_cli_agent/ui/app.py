@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, RichLog
 from textual.containers import Vertical
 from textual.binding import Binding
 from textual import events
 from rich.markdown import Markdown
+from rich.text import Text
 
 from ..engine import AgentEngine
 from ..providers.base import Provider
@@ -17,55 +18,71 @@ from ..mcp.client import McpManager
 logger = logging.getLogger(__name__)
 
 
-class ChatView(Static):  # type: ignore[misc]
-    can_focus = True
-
-    def on_mount(self) -> None:
-        self._buffer = ""
+class ChatView(RichLog):  # type: ignore[misc]
+    def __init__(self, **kwargs) -> None:
+        # Extract widget-specific arguments before passing to RichLog
+        super().__init__(
+            auto_scroll=True,  # Toad-like smooth auto-scrolling
+            markup=True,  # Rich markup support for better formatting
+            highlight=True,  # Code highlighting like Toad
+            max_lines=10000,  # Large scrollback buffer for history
+            **kwargs,  # Pass through any other widget arguments (like id)
+        )
+        self._current_text = ""
 
     def get_text(self) -> str:
-        return self._buffer
+        """Get all text content for copying."""
+        # Extract plain text from all the Rich renderables
+        lines = []
+        try:
+            # Access the internal lines if possible for text extraction
+            if hasattr(self, "_lines"):
+                for line in self._lines:
+                    if hasattr(line, "plain"):
+                        lines.append(line.plain)
+                    else:
+                        lines.append(str(line))
+            else:
+                # Fallback to current text buffer
+                lines.append(self._current_text)
+        except Exception:
+            lines.append(self._current_text)
+        return "\n".join(lines)
 
     def append_text(self, text: str) -> None:
-        # Append streaming text without forcing newlines between chunks
-        self._buffer += text
+        """Append streaming text - optimized for Toad-like performance."""
+        self._current_text += text
         try:
-            self.update(Markdown(self._buffer))
+            # Use Rich's Text for better rendering control
+            rich_text = Text(text)
+            self.write(rich_text)
         except Exception as e:
-            logger.error(f"Error updating markdown: {e}")
-            # Fallback to plain text update
+            logger.error(f"Error writing text to RichLog: {e}")
+            # Fallback to plain string
             try:
-                self.update(self._buffer)
+                self.write(text)
             except Exception:
                 pass  # Can't update, just continue
-        try:
-            self.scroll_end(animate=False)
-        except Exception:
-            pass
 
     def append_block(self, md: str) -> None:
-        # Append as a block with a preceding newline when appropriate
-        if self._buffer:
-            if not self._buffer.endswith("\n"):
-                self._buffer += "\n"
-        self._buffer += md
+        """Append markdown as a formatted block."""
+        self._current_text += f"\n{md}"
         try:
-            self.update(Markdown(self._buffer))
+            # Try rendering as markdown first
+            markdown = Markdown(md)
+            self.write(markdown)
         except Exception as e:
-            logger.error(f"Error updating markdown block: {e}")
-            # Fallback to plain text update
+            logger.error(f"Error rendering markdown in RichLog: {e}")
+            # Fallback to plain text
             try:
-                self.update(self._buffer)
+                self.write(md)
             except Exception:
                 pass  # Can't update, just continue
-        try:
-            self.scroll_end(animate=False)
-        except Exception:
-            pass
 
 
 class ChatApp(App):  # type: ignore[misc]
     def action_copy_chat(self) -> None:
+        """Enhanced copy functionality inspired by Toad's text interaction."""
         try:
             import pyperclip  # type: ignore
         except Exception:
@@ -74,34 +91,115 @@ class ChatApp(App):  # type: ignore[misc]
         try:
             chat = self.query_one("#chat", ChatView)
             text = chat.get_text()
+
+            # Show visual feedback like Toad
+            if not text.strip():
+                self.bell()  # Audio feedback for empty content
+                return
+
         except Exception as e:
             logger.error(f"Error getting chat text: {e}")
+            self.bell()  # Audio feedback for error
             return
 
+        success = False
         if pyperclip:
             try:
                 pyperclip.copy(text)  # type: ignore[attr-defined]
-                return
+                success = True
+                # Visual feedback - could add a toast notification here
             except Exception:
                 pass
-        # Fallback: write to a file
+
+        # Enhanced fallback: write to a file with better naming
+        if not success:
+            try:
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"chat_export_{timestamp}.txt"
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(text)
+                # Could log success to chat view here
+            except Exception as e:
+                logger.error(f"Error writing chat export file: {e}")
+                self.bell()  # Audio feedback for error
+
+    def action_clear_chat(self) -> None:
+        """Clear chat history - Toad-inspired quick action."""
         try:
-            with open("chat_export.txt", "w", encoding="utf-8") as f:
-                f.write(text)
+            chat = self.query_one("#chat", ChatView)
+            chat.clear()
+            chat._current_text = ""
         except Exception as e:
-            logger.error(f"Error writing chat export file: {e}")
+            logger.error(f"Error clearing chat: {e}")
+
+    def action_scroll_home(self) -> None:
+        """Scroll to top of chat - enhanced navigation."""
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.scroll_home(animate=True)
+        except Exception as e:
+            logger.error(f"Error scrolling to home: {e}")
+
+    def action_scroll_end(self) -> None:
+        """Scroll to bottom of chat - enhanced navigation."""
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.scroll_end(animate=True)
+        except Exception as e:
+            logger.error(f"Error scrolling to end: {e}")
 
     CSS = """
-    Screen { layout: vertical; }
-    #chat { height: 1fr; overflow: auto; }
-    #input { dock: bottom; }
+    Screen {
+        layout: vertical;
+        background: $surface;
+    }
+
+    #chat {
+        height: 1fr;
+        overflow: auto;
+        border: solid $primary;
+        scrollbar-background: $panel;
+        scrollbar-color: $accent;
+        scrollbar-corner-color: $panel;
+        scrollbar-size: 1 1;
+    }
+
+    #input {
+        dock: bottom;
+        margin: 1 0;
+        border: solid $accent;
+        background: $surface;
+    }
+
+    /* Toad-inspired clean styling */
+    RichLog {
+        background: $surface;
+        color: $text;
+        border: none;
+        padding: 1;
+    }
+
+    Input {
+        background: $surface;
+        color: $text;
+    }
     """
 
     BINDINGS = [
+        # Core navigation - keep Toad-like simplicity
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+d", "quit", "Quit", show=False),
+        # Enhanced text interaction - Toad-inspired
         Binding("ctrl+y", "copy_chat", "Copy chat", show=True),
+        Binding("ctrl+l", "clear_chat", "Clear", show=True),
+        # Enhanced navigation - smooth scrolling like Toad
+        Binding("home", "scroll_home", "Top", show=True),
+        Binding("end", "scroll_end", "Bottom", show=True),
+        Binding("ctrl+home", "scroll_home", "Top", show=False),
+        Binding("ctrl+end", "scroll_end", "Bottom", show=False),
     ]
 
     def on_key(self, event: events.Key) -> None:

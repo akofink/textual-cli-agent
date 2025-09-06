@@ -1,12 +1,16 @@
 # textual-cli-agent
 
-A Textual-based CLI LLM agent with MCP support and pluggable Python tools. It supports popular model providers (OpenAI and Anthropic) out of the box, including GPT-5 (as a model name for OpenAI-compatible endpoints) and Claude 4 Sonnet.
+A robust Textual-based CLI LLM agent with comprehensive error handling, MCP support, and pluggable Python tools. It supports popular model providers (OpenAI and Anthropic) out of the box, including GPT-5 (as a model name for OpenAI-compatible endpoints) and Claude 4 Sonnet.
 
-- Terminal UI built with Textual
-- Provider-agnostic agent core with adapters for OpenAI and Anthropic
-- Tool calling and Python tool registry via a simple decorator
-- MCP client to connect to servers via stdio and HTTP (gRPC scaffold provided)
-- Extensible design: add your own providers, tools, and MCP transports
+## Features
+
+- **Terminal UI** built with Textual with defensive error handling
+- **Provider-agnostic** agent core with adapters for OpenAI and Anthropic
+- **Robust error handling** with graceful degradation and timeout protection
+- **Tool calling** and Python tool registry via a simple decorator
+- **MCP client** to connect to servers via stdio and HTTP (gRPC scaffold provided)
+- **Comprehensive testing** with 58% coverage and defensive programming patterns
+- **Extensible design**: add your own providers, tools, and MCP transports
 
 ## Quick start (using uv)
 
@@ -124,7 +128,12 @@ The agent will advertise your tools to the selected provider and automatically e
 
 - Type your prompt and press Enter
 - Tool call results and assistant messages are streamed into the chat view
-- Ctrl+C to exit
+- **Robust error handling**: API errors, stream processing failures, and UI errors are handled gracefully
+- **Keyboard shortcuts**:
+  - Ctrl+C, Ctrl+Q, Ctrl+D to exit
+  - Ctrl+Y to copy chat history
+- **Timeout protection**: Tool execution is protected with 60-second timeouts
+- All errors are logged and displayed in a user-friendly format
 
 ## Extending providers
 

@@ -8,7 +8,9 @@
       "Bash(uv run pytest:*)",
       "Bash(uv run:*)",
       "Bash(cat:*)",
-      "Bash(uv add:*)"
+      "Bash(uv add:*)",
+      "WebFetch(domain:willmcgugan.github.io)",
+      "WebFetch(domain:textual.textualize.io)"
     ]
   },
   "outputStyle": "default"
