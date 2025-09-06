@@ -6,7 +6,7 @@ import json
 import asyncio
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Input, RichLog
+from textual.widgets import Footer, Header, Input, RichLog, Static
 from textual.containers import Vertical
 from textual.binding import Binding
 from textual import events
@@ -134,6 +134,15 @@ class ChatApp(App):  # type: ignore[misc]
     Input {
         background: $surface;
         color: $text;
+    }
+
+    .status {
+        dock: bottom;
+        height: 1;
+        background: $accent;
+        color: $text;
+        text-align: center;
+        padding: 0 1;
     }
     """
 
@@ -325,6 +334,22 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception:
             pass
 
+    def _update_status(self, working: bool = False) -> None:
+        """Update the footer status bar with current state."""
+        try:
+            status_bar = self.query_one("#status_bar", Static)
+            if working:
+                status_text = f"Working… (pending: {self._pending_count})"
+            else:
+                status_text = (
+                    f"Idle (pending: {self._pending_count})"
+                    if self._pending_count > 0
+                    else "Idle"
+                )
+            status_bar.update(status_text)
+        except Exception:
+            pass  # Status bar may not be mounted yet
+
     def _render_todos(self, chat: "ChatView") -> None:
         try:
             if not self._show_todo:
@@ -349,7 +374,8 @@ class ChatApp(App):  # type: ignore[misc]
                 password=False,
             ),
         )
-        yield Footer()
+        yield Static("Idle", id="status_bar", classes="status")
+        yield Footer(id="footer")
 
     async def _worker(self) -> None:
         chat = self.query_one("#chat", ChatView)
@@ -372,6 +398,7 @@ class ChatApp(App):  # type: ignore[misc]
                     self.sub_title = title
                 except Exception:
                     pass
+                self._update_status(working=False)
 
     def on_mount(self) -> None:
         # Update header title with live status
@@ -379,6 +406,8 @@ class ChatApp(App):  # type: ignore[misc]
             self._refresh_header()
         except Exception:
             pass
+        # Initialize footer status
+        self._update_status(working=False)
         if self._initial_markdown:
             try:
                 chat = self.query_one("#chat", ChatView)
@@ -408,6 +437,7 @@ class ChatApp(App):  # type: ignore[misc]
                 self.sub_title = "Working..."
             except Exception:
                 pass
+            self._update_status(working=True)
             async for chunk in self.engine.run_stream(self.messages):
                 # Ensure UI stays responsive in long streams (no-op in tests)
                 await asyncio.sleep(0)
@@ -874,6 +904,7 @@ class ChatApp(App):  # type: ignore[misc]
             if use_queue:
                 await self._queue.put(prompt)
                 self._pending_count += 1
+                self._update_status(working=False)  # Update pending count
             else:
                 # Direct execution fallback for tests
                 chat.append_block(f"**You:**\n{prompt}")
