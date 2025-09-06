@@ -16,6 +16,10 @@ class AgentEngine:
     def __init__(self, provider: Provider, mcp_manager: Optional[McpManager] = None):
         self.provider = provider
         self.mcp_manager = mcp_manager
+        # Runtime-tunable settings
+        self.tool_timeout: float = 60.0
+        self.concurrency_limit: Optional[int] = None  # None = unbounded gather
+        self.enabled_tools: Optional[set[str]] = None  # None = all tools
 
     def _combined_tool_specs(self) -> List[ToolSpec]:
         specs = get_tool_specs()
@@ -52,6 +56,9 @@ class AgentEngine:
             tools: List[ToolSpec] = []
             try:
                 tools = self._combined_tool_specs()
+                # Apply enabled_tools filter if configured
+                if self.enabled_tools is not None:
+                    tools = [t for t in tools if t.get("name") in self.enabled_tools]
             except Exception as e:
                 logger.error(f"Error getting tool specs: {e}")
                 # Continue with empty tools rather than failing completely
@@ -110,11 +117,24 @@ class AgentEngine:
             # Execute any scheduled tools concurrently, then build tool result messages
             if scheduled_tools:
                 try:
+                    sem = (
+                        asyncio.Semaphore(self.concurrency_limit)
+                        if self.concurrency_limit and self.concurrency_limit > 0
+                        else None
+                    )
+
+                    async def _run_with_limit(t):
+                        if sem is None:
+                            return await self._execute_tool_safely(
+                                t["name"], t["arguments"]
+                            )
+                        async with sem:
+                            return await self._execute_tool_safely(
+                                t["name"], t["arguments"]
+                            )
+
                     results = await asyncio.gather(
-                        *[
-                            self._execute_tool_safely(t["name"], t["arguments"])
-                            for t in scheduled_tools
-                        ],
+                        *[_run_with_limit(t) for t in scheduled_tools],
                         return_exceptions=False,
                     )
                     for t, res in zip(scheduled_tools, results):

@@ -104,6 +104,9 @@ The codebase maintains **58% test coverage** with focus on error handling scenar
 
 ## Quality Standards
 
+- TODO: Ensure chat_export*.txt files are always ignored and not committed to git.
+
+
 - **Type Safety**: Full mypy coverage with strict checking enabled
 - **Code Style**: Ruff + Black for consistent formatting and linting
 - **Pre-commit Hooks**: Automatic quality checks on every commit

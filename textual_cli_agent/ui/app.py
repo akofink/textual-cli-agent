@@ -14,7 +14,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 
 from ..engine import AgentEngine
-from ..providers.base import Provider
+from ..providers.base import Provider, ProviderConfig, ProviderFactory
 from ..mcp.client import McpManager
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,12 @@ class ChatView(RichLog):  # type: ignore[misc]
 
 
 class ChatApp(App):  # type: ignore[misc]
+    # TODO: Tool call logs sometimes appear after tool results in UI; investigate event ordering.
+    # TODO: Ensure chat_export*.txt files are always gitignored and never committed.
+
+    provider: Provider
+    engine: AgentEngine
+
     def action_copy_chat(self) -> None:
         """Enhanced copy functionality inspired by Toad's text interaction."""
         try:
@@ -163,16 +169,21 @@ class ChatApp(App):  # type: ignore[misc]
         background: $surface;
     }
 
+    Header Title {
+        content-align: left middle;
+    }
+
     #chat {
         height: 1fr;
-        overflow: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
         border: solid $primary;
         scrollbar-background: $panel;
         scrollbar-color: $accent;
         scrollbar-corner-color: $panel;
         scrollbar-size: 1 1;
         text-wrap: wrap; /* ensure wrapping vs horizontal scroll */
-        width: 96%; /* slightly narrower to prevent 1-char overflow in some terminals */
+        width: 100%;
     }
 
     #input {
@@ -210,6 +221,37 @@ class ChatApp(App):  # type: ignore[misc]
         Binding("ctrl+end", "scroll_end", "Bottom", show=False),
     ]
 
+    def _apply_provider_config(
+        self,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        system: Optional[str] = None,
+    ) -> None:
+        try:
+            cfg = ProviderConfig(
+                model=model or self.provider.cfg.model,
+                api_key=self.provider.cfg.api_key,
+                base_url=self.provider.cfg.base_url,
+                temperature=temperature
+                if temperature is not None
+                else self.provider.cfg.temperature,
+                system_prompt=system
+                if system is not None
+                else self.provider.cfg.system_prompt,
+            )
+            # Recreate provider with new config, preserve class type
+            prov_name = type(self.provider).__name__.replace("Provider", "").lower()
+            # Try to infer factory
+            if prov_name in ("openai", "anthropic"):
+                new_provider = ProviderFactory.create(prov_name, cfg)
+            else:
+                # Fallback to same class constructor
+                new_provider = type(self.provider)(cfg)
+            self.provider = new_provider
+            self.engine.provider = new_provider
+        except Exception as e:
+            logger.error(f"Error applying provider config: {e}")
+
     def on_key(self, event: events.Key) -> None:
         # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
         if event.key in ("ctrl+q", "ctrl+d"):
@@ -231,31 +273,89 @@ class ChatApp(App):  # type: ignore[misc]
         self._initial_markdown = initial_markdown or ""
         # Track tool calls by id to enhance result display
         self._tool_calls_by_id: Dict[str, Dict[str, Any]] = {}
+        # Runtime toggles
+        self.auto_continue: bool = True
+        self.max_rounds: int = 6
+        # Background processing and queuing
+        self._worker_task: Optional[asyncio.Task] = None
+        self._pending_count: int = 0
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        # Tool call/result ordering tracking
+        self._displayed_tool_calls: set[str] = set()
+        # Simple TODO list pane
+        self._todos: List[str] = []
+        self._show_todo: bool = False
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=True, id="hdr")
         yield Vertical(
             ChatView(id="chat"),
             Input(
-                placeholder="Type a message and press Enter", id="input", password=False
+                placeholder="Type a message and press Enter (/help for commands)",
+                id="input",
+                password=False,
             ),
         )
         yield Footer()
 
+    async def _worker(self) -> None:
+        chat = self.query_one("#chat", ChatView)
+        while True:
+            prompt = await self._queue.get()
+            try:
+                # Show user prompt as its own block
+                chat.append_block(f"**You:**\n{prompt}")
+                chat.append_hr()
+                self.messages.append({"role": "user", "content": prompt})
+                await self._run_auto_rounds(chat)
+            except Exception as e:
+                logger.error(f"Worker error: {e}")
+                chat.append_block(f"**[ERROR]** Worker error: {str(e)}")
+            finally:
+                self._pending_count = max(0, self._pending_count - 1)
+                # Update header subtitle with pending
+                try:
+                    title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"
+                    self.query_one("#hdr", Header).sub_title = title
+                except Exception:
+                    pass
+
     def on_mount(self) -> None:
+        # Update header title with live status
+        try:
+            title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds}"
+            self.query_one("#hdr", Header).sub_title = title
+        except Exception:
+            pass
         if self._initial_markdown:
             try:
                 chat = self.query_one("#chat", ChatView)
                 chat.append_block(self._initial_markdown)
             except Exception as e:
                 logger.error(f"Error displaying initial markdown: {e}")
+        # Start worker for queued prompts if an event loop is running
+        try:
+            loop = asyncio.get_running_loop()
+            if self._worker_task is None:
+                self._worker_task = loop.create_task(self._worker())
+        except RuntimeError:
+            # No running loop (e.g., during some tests); worker will be started later
+            pass
+        except Exception as e:
+            logger.error(f"Failed to start worker: {e}")
 
     async def _run_auto_rounds(self, chat: "ChatView") -> None:
-        max_rounds = 6
         rounds = 0
         while True:
+            if not self.auto_continue and rounds > 0:
+                break
             had_tools_this_round = False
             text_buf = ""
+            # Show working indicator
+            try:
+                self.query_one("#hdr", Header).sub_title = "Working..."
+            except Exception:
+                pass
             async for chunk in self.engine.run_stream(self.messages):
                 # Ensure UI stays responsive in long streams (no-op in tests)
                 await asyncio.sleep(0)
@@ -279,6 +379,7 @@ class ChatApp(App):  # type: ignore[misc]
                                 "name": tool_name,
                                 "arguments": tool_args,
                             }
+                        # Buffer tool call; render before its result
                         chat.append_block(
                             f"[tool call]\nname: {tool_name}\nargs: {tool_args}"
                         )
@@ -341,8 +442,168 @@ class ChatApp(App):  # type: ignore[misc]
                     chat.append_text(f"[ERROR] Processing error: {str(e)}")
                     continue
             rounds += 1
-            if not had_tools_this_round or rounds >= max_rounds:
+            if not had_tools_this_round or rounds >= self.max_rounds:
                 break
+            # Restore header subtitle to status between rounds
+            try:
+                title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds}"
+                self.query_one("#hdr", Header).sub_title = title
+            except Exception:
+                pass
+
+    def _handle_command(self, line: str, chat: "ChatView") -> bool:
+        try:
+            parts = line.strip().split()
+            if not parts:
+                return True
+            cmd = parts[0].lower()
+            args = parts[1:]
+
+            def ok(msg: str) -> None:
+                chat.append_block(f"[ok] {msg}")
+
+            def err(msg: str) -> None:
+                chat.append_block(f"[error] {msg}")
+
+            if cmd == "/help":
+                ok(
+                    "Commands:\n"
+                    "/help\n"
+                    "/model <name>\n"
+                    "/provider <openai|anthropic>\n"
+                    "/temp <float>\n"
+                    "/system <text>\n"
+                    "/auto <on|off>\n"
+                    "/rounds <n>\n"
+                    "/parallel <on|off>\n"
+                    "/parallel limit <n>\n"
+                    "/timeout <seconds>\n"
+                    "/tools\n"
+                    "/tools enable <name>\n"
+                    "/tools disable <name>\n"
+                )
+                return True
+            if cmd == "/model" and args:
+                self._apply_provider_config(model=" ".join(args))
+                ok(f"model set -> {' '.join(args)}")
+                return True
+            if cmd == "/provider" and args:
+                prov = args[0].lower()
+                if prov not in ("openai", "anthropic"):
+                    err("provider must be 'openai' or 'anthropic'")
+                    return True
+                try:
+                    cfg = ProviderConfig(
+                        model=self.provider.cfg.model,
+                        api_key=self.provider.cfg.api_key,
+                        base_url=self.provider.cfg.base_url,
+                        temperature=self.provider.cfg.temperature,
+                        system_prompt=self.provider.cfg.system_prompt,
+                    )
+                    new_provider = ProviderFactory.create(prov, cfg)
+                    self.provider = new_provider
+                    self.engine.provider = new_provider
+                    ok(f"provider -> {prov}")
+                except Exception as e:
+                    err(f"failed to switch provider: {str(e)}")
+                return True
+            if cmd == "/temp" and args:
+                try:
+                    t = float(args[0])
+                except Exception:
+                    err("temp must be a float")
+                    return True
+                self._apply_provider_config(temperature=t)
+                ok(f"temperature set -> {t}")
+                return True
+            if cmd == "/system" and args:
+                text = " ".join(args)
+                self._apply_provider_config(system=text)
+                ok("system prompt updated")
+                return True
+            if cmd == "/auto" and args:
+                val = args[0].lower()
+                self.auto_continue = val in ("on", "true", "1", "yes")
+                ok(f"auto-continue -> {self.auto_continue}")
+                return True
+            if cmd == "/rounds" and args:
+                try:
+                    n = int(args[0])
+                except Exception:
+                    err("rounds must be an integer")
+                    return True
+                self.max_rounds = max(1, n)
+                ok(f"max rounds -> {self.max_rounds}")
+                return True
+            if cmd == "/parallel" and args:
+                if args[0] == "limit" and len(args) > 1:
+                    try:
+                        n = int(args[1])
+                    except Exception:
+                        err("parallel limit must be an integer")
+                        return True
+                    self.engine.concurrency_limit = max(1, n)
+                    ok(f"concurrency limit -> {self.engine.concurrency_limit}")
+                    return True
+                else:
+                    val = args[0].lower()
+                    if val in ("on", "off"):
+                        # 'on' removes limit; 'off' sets to 1
+                        self.engine.concurrency_limit = None if val == "on" else 1
+                        ok(f"parallel -> {val}")
+                        return True
+            if cmd == "/timeout" and args:
+                try:
+                    secs = float(args[0])
+                except Exception:
+                    err("timeout must be a number (seconds)")
+                    return True
+                self.engine.tool_timeout = max(1.0, secs)
+                ok(f"tool timeout -> {self.engine.tool_timeout}s")
+                return True
+            if cmd == "/tools":
+                names = [
+                    t.get("name", "")
+                    for t in self.engine._combined_tool_specs()
+                    if t.get("name") is not None
+                ]
+                if self.engine.enabled_tools is None:
+                    enabled = set(names)
+                else:
+                    enabled = set(self.engine.enabled_tools)
+                lines = ["Tools:"] + [
+                    ("* " if n in enabled else "  ") + n for n in names
+                ]
+                chat.append_block("\n".join(lines))
+                return True
+            if cmd == "/tools" and len(args) >= 2:
+                sub = args[0].lower()
+                name = " ".join(args[1:])
+                if sub == "enable":
+                    if self.engine.enabled_tools is None:
+                        self.engine.enabled_tools = set()
+                    self.engine.enabled_tools.add(name)
+                    ok(f"enabled tool -> {name}")
+                    return True
+                if sub == "disable":
+                    if self.engine.enabled_tools is None:
+                        # initialize to all tools then remove
+                        self.engine.enabled_tools = set(
+                            n
+                            for n in (
+                                t.get("name")
+                                for t in self.engine._combined_tool_specs()
+                            )
+                            if n is not None
+                        )
+                    self.engine.enabled_tools.discard(name)
+                    ok(f"disabled tool -> {name}")
+                    return True
+        except Exception as e:
+            logger.error(f"Command handling failed: {e}")
+            chat.append_block(f"[error] command failed: {str(e)}")
+            return True
+        return False
 
     async def on_input_submitted(self, event: Any) -> None:
         try:
@@ -359,13 +620,35 @@ class ChatApp(App):  # type: ignore[misc]
                 logger.warning(f"Failed to clear input: {e}")
 
             chat = self.query_one("#chat", ChatView)
-            # Show user prompt as its own block
-            chat.append_block(f"**You:**\n{prompt}")
-            chat.append_hr()
-            self.messages.append({"role": "user", "content": prompt})
+            # Slash commands are handled locally
+            if prompt.strip().startswith("/"):
+                handled = self._handle_command(prompt, chat)
+                if handled:
+                    return
 
+            # Queue the prompt so UI remains responsive and supports multiple pending
+            # In test contexts, we may not have a running worker; fall back to direct run
             try:
+                _ = asyncio.get_running_loop()
+                use_queue = (
+                    self._worker_task is not None and not self._worker_task.done()
+                )
+            except RuntimeError:
+                use_queue = False
+            if use_queue:
+                await self._queue.put(prompt)
+                self._pending_count += 1
+            else:
+                # Direct execution fallback for tests
+                chat.append_block(f"**You:**\n{prompt}")
+                chat.append_hr()
+                self.messages.append({"role": "user", "content": prompt})
                 await self._run_auto_rounds(chat)
+            try:
+                title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"
+                self.query_one("#hdr", Header).sub_title = title
+            except Exception:
+                pass
             except Exception as e:
                 logger.error(f"Error during stream processing: {e}")
                 chat.append_block(f"**[ERROR]** Stream processing failed: {str(e)}")
