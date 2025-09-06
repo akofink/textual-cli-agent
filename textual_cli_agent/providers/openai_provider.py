@@ -210,6 +210,49 @@ class OpenAIProvider(Provider):
                         continue
             except Exception as e:
                 logger.error(f"Error during stream processing: {e}")
+
+                # Apply intelligent error handling for stream errors too
+                if api_error_handler.should_prune_context(e):
+                    if retry_count < 2:  # Limit retries to prevent infinite loops
+                        pruned_messages = context_manager.adaptive_prune_with_summary(
+                            original_messages, str(e)
+                        )
+                        recovery_msg = api_error_handler.get_recovery_message(e)
+                        yield {"type": "text", "delta": f"[RECOVERY] {recovery_msg}"}
+
+                        # Retry with pruned context
+                        async for chunk in self._completions_stream_with_retry(
+                            pruned_messages, tools, retry_count + 1
+                        ):
+                            yield chunk
+                        return
+
+                # For rate limits and other retryable errors, use the error handler
+                try:
+                    analysis = api_error_handler.analyze_error(e)
+                    if (
+                        analysis.is_recoverable
+                        and analysis.should_retry
+                        and retry_count == 0
+                    ):
+                        recovery_msg = api_error_handler.get_recovery_message(e)
+                        yield {"type": "text", "delta": f"[RECOVERY] {recovery_msg}"}
+
+                        # Use the error handler's retry logic
+                        async for chunk in api_error_handler.handle_error_with_retry(
+                            e,
+                            f"openai_stream_{id(original_messages)}",
+                            self._completions_stream_with_retry,
+                            original_messages,
+                            tools,
+                            retry_count + 1,
+                        ):
+                            yield chunk
+                        return
+                except Exception:
+                    # If error handling fails, fall back to original error
+                    pass
+
                 yield {
                     "type": "text",
                     "delta": f"[ERROR] Stream processing failed: {str(e)}",

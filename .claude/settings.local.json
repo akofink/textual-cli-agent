@@ -11,7 +11,8 @@
       "Bash(uv add:*)",
       "WebFetch(domain:willmcgugan.github.io)",
       "WebFetch(domain:textual.textualize.io)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python3:*)"
     ]
   },
   "outputStyle": "default"

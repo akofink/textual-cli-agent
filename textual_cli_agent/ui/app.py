@@ -828,7 +828,7 @@ class ChatApp(App):  # type: ignore[misc]
 
                         # Display simple clickable version in chat
                         # Using a simple format that can be clicked to show in tool panel
-                        chat.write(f"🔧 {tool_name} called", style="link blue")
+                        chat.write(f"🔧 {tool_name} called")
                         chat.write("\n")
                     elif ctype == "tool_result":
                         content = chunk.get("content", "")
@@ -842,7 +842,7 @@ class ChatApp(App):  # type: ignore[misc]
 
                         # Display simple result indicator in chat
                         result_summary = self._get_result_summary(content)
-                        chat.write(f"✅ Result: {result_summary}", style="green dim")
+                        chat.write(f"✅ Result: {result_summary}")
                         chat.write("\n")
 
                         # Update tool panel with result
