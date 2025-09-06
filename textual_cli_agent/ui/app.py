@@ -746,6 +746,7 @@ class ChatApp(App):  # type: ignore[misc]
                     "/todo add <item>\n"
                     "/todo remove <n>\n"
                     "/todo show|hide\n"
+                    "/prune [n]\n"
                 )
                 return True
             if cmd == "/config":
@@ -922,6 +923,40 @@ class ChatApp(App):  # type: ignore[misc]
                     ok(f"todo -> {sub}")
                     return True
                 err("usage: /todo add <item> | /todo remove <n> | /todo show|hide")
+                return True
+            if cmd == "/prune":
+                # Prune conversation history to manage context length
+                prune_count = 10  # Default number of messages to keep
+                if args:
+                    try:
+                        prune_count = int(args[0])
+                    except Exception:
+                        err("prune count must be an integer")
+                        return True
+
+                original_count = len(self.messages)
+                if original_count <= prune_count:
+                    ok(
+                        f"No pruning needed. Current: {original_count} messages, keep: {prune_count}"
+                    )
+                    return True
+
+                # Keep the system message (if present) and the last N messages
+                pruned_messages = []
+                if self.messages and self.messages[0].get("role") == "system":
+                    pruned_messages.append(self.messages[0])
+                    # Keep last N-1 messages (since we kept system message)
+                    pruned_messages.extend(self.messages[-(prune_count - 1) :])
+                else:
+                    # Keep last N messages
+                    pruned_messages = self.messages[-prune_count:]
+
+                removed_count = original_count - len(pruned_messages)
+                self.messages = pruned_messages
+
+                ok(
+                    f"Pruned {removed_count} messages. Kept {len(pruned_messages)} messages."
+                )
                 return True
                 ok(
                     "Commands:\n"
