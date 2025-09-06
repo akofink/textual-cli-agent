@@ -17,6 +17,7 @@ from ..engine import AgentEngine
 from ..providers.base import Provider, ProviderConfig, ProviderFactory
 from ..mcp.client import McpManager
 from ..config import ConfigManager
+from .tool_panel import ToolPanel
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +378,7 @@ class ChatApp(App):  # type: ignore[misc]
                 "Shortcuts:\n"
                 "  Ctrl+?  Help panel\n"
                 "  Ctrl+T  Toggle TODO panel\n"
+                "  F2      Toggle Tools panel\n"
                 "  Ctrl+Y  Copy chat\n"
                 "  Ctrl+L  Clear chat\n"
                 "  Home/End Scroll\n"
@@ -418,6 +420,14 @@ class ChatApp(App):  # type: ignore[misc]
             chat.scroll_end(animate=True)
         except Exception as e:
             logger.error(f"Error scrolling to end: {e}")
+
+    def action_toggle_tools(self) -> None:
+        """Toggle the tool panel visibility."""
+        try:
+            tool_panel = self.query_one("#tool_panel", ToolPanel)
+            tool_panel.toggle_visibility()
+        except Exception as e:
+            logger.error(f"Error toggling tool panel: {e}")
 
     def _status_title(self) -> str:
         return (
@@ -472,6 +482,7 @@ class ChatApp(App):  # type: ignore[misc]
                 password=False,
             ),
         )
+        yield ToolPanel()
         yield Static("Idle", id="status_bar", classes="status")
         yield Footer(id="footer")
 
@@ -535,6 +546,14 @@ class ChatApp(App):  # type: ignore[misc]
                 break
             had_tools_this_round = False
             text_buf = ""
+
+            # Start new turn in tool panel
+            try:
+                tool_panel = self.query_one("#tool_panel", ToolPanel)
+                tool_panel.start_turn(rounds + 1)
+            except Exception:
+                pass  # Tool panel might not be mounted
+
             # Show working indicator
             try:
                 self.sub_title = "Working..."
@@ -565,6 +584,14 @@ class ChatApp(App):  # type: ignore[misc]
                                 "arguments": tool_args,
                             }
                             self._displayed_tool_calls.add(tool_id)
+
+                            # Update tool panel
+                            try:
+                                tool_panel = self.query_one("#tool_panel", ToolPanel)
+                                tool_panel.add_tool_call(tool_id, tool_name, tool_args)
+                            except Exception:
+                                pass  # Tool panel might not be mounted
+
                         # Render call with explicit id for mapping clarity
                         chat.append_block(
                             f"[tool call]\nid: {tool_id}\nname: {tool_name}\nargs: {tool_args}"
@@ -599,6 +626,15 @@ class ChatApp(App):  # type: ignore[misc]
                             if len(str(content)) > max_display
                             else str(content)
                         )
+
+                        # Update tool panel with result
+                        if tool_id:
+                            try:
+                                tool_panel = self.query_one("#tool_panel", ToolPanel)
+                                tool_panel.update_tool_result(tool_id, result=content)
+                            except Exception:
+                                pass  # Tool panel might not be mounted
+
                         chat.append_block(f"{header}\n{display}")
                         chat.append_hr()
                     elif ctype == "append_message":
