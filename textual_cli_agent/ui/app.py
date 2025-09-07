@@ -474,10 +474,13 @@ class ChatApp(App):  # type: ignore[misc]
         # Apply any saved provider config overrides
         self._apply_saved_provider_config()
 
-        # Apply saved theme
+        # Apply saved theme (rely on Textual to validate/resolve)
         saved_theme = self.config.get("theme")
         if saved_theme:
-            self.theme = saved_theme
+            try:
+                self.theme = saved_theme
+            except Exception as e:
+                logger.warning(f"Failed to apply saved theme '{saved_theme}': {e}")
 
     def _write_tool_debug(
         self, tool_id: str, event_type: str, data: Dict[str, Any]
@@ -527,11 +530,49 @@ class ChatApp(App):  # type: ignore[misc]
             return str(content)[:100]
 
     def action_toggle_dark(self) -> None:
-        """Toggle dark/light theme and save preference."""
-        # Let Textual do the theme toggle
+        """Toggle dark/light theme and save the resolved theme name to config.
+        Note: Users may set non-binary themes (e.g., 'solarized-light'); we persist whatever Textual resolves.
+        """
         super().action_toggle_dark()
-        # Save the new theme to config
-        self.config.set("theme", self.theme)
+        # Persist the resolved theme name
+        try:
+            self.config.set("theme", self.theme)
+        except Exception as e:
+            logger.error(f"Failed to save theme preference: {e}")
+
+    def action_set_theme(self, theme: str) -> None:
+        """Set a specific theme by name and persist to config.
+        This is called by Textual's command palette when choosing a theme.
+        """
+        try:
+            # Prefer Textual's implementation if available
+            super().action_set_theme(theme)  # type: ignore[attr-defined]
+        except Exception:
+            # Fallback: set directly
+            try:
+                self.theme = theme
+            except Exception as e:
+                logger.error(f"Failed to set theme '{theme}': {e}")
+                return
+        # Persist resolved theme name
+        try:
+            self.config.set("theme", self.theme)
+        except Exception as e:
+            logger.error(f"Failed to save theme preference: {e}")
+
+    # Persist theme changes regardless of how they occur (toggle, palette, programmatic)
+    def watch_theme(self, theme: str) -> None:  # type: ignore[override]
+        try:
+            self.config.set("theme", theme)
+        except Exception as e:
+            logger.error(f"Failed to persist theme in watch_theme: {e}")
+
+    def watch_dark(self, dark: bool) -> None:  # type: ignore[override]
+        # Save the resolved theme name when dark mode toggles
+        try:
+            self.config.set("theme", self.theme)
+        except Exception as e:
+            logger.error(f"Failed to persist theme in watch_dark: {e}")
 
     def action_copy_chat(self) -> None:
         """Enhanced copy functionality inspired by Toad's text interaction."""

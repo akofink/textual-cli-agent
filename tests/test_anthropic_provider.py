@@ -1,6 +1,11 @@
 import pytest
 
-from textual_cli_agent.providers.anthropic_provider import AnthropicProvider
+try:
+    from textual_cli_agent.providers.anthropic_provider import AnthropicProvider
+except ModuleNotFoundError:
+    pytest.skip(
+        "anthropic provider optional dep not installed", allow_module_level=True
+    )
 from textual_cli_agent.providers.base import ProviderConfig
 
 

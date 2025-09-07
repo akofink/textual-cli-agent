@@ -4,7 +4,10 @@ import json
 import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from anthropic import AsyncAnthropic
+try:
+    from anthropic import AsyncAnthropic  # type: ignore
+except Exception:  # pragma: no cover - optional dependency fallback
+    AsyncAnthropic = None  # type: ignore
 
 from .base import Provider, ProviderConfig, ToolSpec
 from ..error_handler import api_error_handler
@@ -13,10 +16,27 @@ from ..context_manager import context_manager
 logger = logging.getLogger(__name__)
 
 
+class _DummyMessages:
+    def stream(self, *args, **kwargs):  # pragma: no cover - simple placeholder
+        raise ModuleNotFoundError(
+            "anthropic SDK is not installed. Install 'anthropic' to enable streaming."
+        )
+
+
+class _DummyAnthropicClient:
+    def __init__(self) -> None:  # pragma: no cover - simple placeholder
+        self.messages = _DummyMessages()
+
+
 class AnthropicProvider(Provider):
     def __init__(self, cfg: ProviderConfig):
         super().__init__(cfg)
-        self.client = AsyncAnthropic(api_key=cfg.api_key)
+        # Lazily provide a client so unit tests for helper methods don't require the SDK.
+        self.client = (
+            AsyncAnthropic(api_key=cfg.api_key)
+            if AsyncAnthropic is not None
+            else _DummyAnthropicClient()
+        )
 
     async def list_tools_format(self, tools: List[ToolSpec]) -> Any:
         # Anthropic tools are compatible with JSON schema

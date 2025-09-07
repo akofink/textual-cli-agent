@@ -4,7 +4,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from textual_cli_agent.providers.openai_provider import OpenAIProvider
-from textual_cli_agent.providers.anthropic_provider import AnthropicProvider
+
+try:
+    from textual_cli_agent.providers.anthropic_provider import AnthropicProvider
+except ModuleNotFoundError:
+    AnthropicProvider = None  # type: ignore
 from textual_cli_agent.providers.base import ProviderConfig
 
 
@@ -135,6 +139,9 @@ async def test_openai_provider_handles_json_errors():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    AnthropicProvider is None, reason="anthropic optional dep not installed"
+)
 async def test_anthropic_provider_api_error():
     """Test Anthropic provider handles API errors gracefully."""
     config = ProviderConfig(model="claude-3-sonnet-20240229", api_key="test")
@@ -158,6 +165,9 @@ async def test_anthropic_provider_api_error():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    AnthropicProvider is None, reason="anthropic optional dep not installed"
+)
 async def test_anthropic_provider_invalid_messages():
     """Test Anthropic provider handles invalid messages."""
     config = ProviderConfig(model="claude-3-sonnet-20240229", api_key="test")
@@ -179,6 +189,9 @@ async def test_anthropic_provider_invalid_messages():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    AnthropicProvider is None, reason="anthropic optional dep not installed"
+)
 async def test_anthropic_provider_handles_stream_errors():
     """Test that Anthropic provider gracefully handles stream processing errors."""
     config = ProviderConfig(model="claude-3-sonnet-20240229", api_key="test")
@@ -201,6 +214,9 @@ async def test_anthropic_provider_handles_stream_errors():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    AnthropicProvider is None, reason="anthropic optional dep not installed"
+)
 async def test_anthropic_provider_no_valid_messages():
     """Test Anthropic provider handles case with no valid messages."""
     config = ProviderConfig(model="claude-3-sonnet-20240229", api_key="test")
