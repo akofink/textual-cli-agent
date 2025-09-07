@@ -4,7 +4,6 @@ import logging
 from typing import Any, Dict, List, Optional
 import json
 import asyncio
-from pathlib import Path
 from datetime import datetime
 
 from textual.app import App, ComposeResult
@@ -21,7 +20,7 @@ from ..engine import AgentEngine
 from ..providers.base import Provider, ProviderConfig, ProviderFactory
 from ..mcp.client import McpManager
 from ..config import ConfigManager
-from .tool_panel import ToolPanel
+from ..session_store import SessionStore
 from .todo_panel import TodoPanel
 
 logger = logging.getLogger(__name__)
@@ -35,6 +34,18 @@ class ChatCommands(CommandProvider):
         matcher = self.matcher(query)
 
         commands = [
+            (
+                "list sessions",
+                "List Sessions",
+                "action_list_sessions",
+                "Show available past sessions",
+            ),
+            (
+                "resume session",
+                "Resume Session",
+                "action_resume_session",
+                "Resume a past session by selecting from a list",
+            ),
             (
                 "toggle tools",
                 "Toggle Tools Panel",
@@ -181,6 +192,9 @@ class ChatApp(App):  # type: ignore[misc]
 
     # Add our custom command provider to the command palette
     COMMANDS = App.COMMANDS | {ChatCommands}
+
+    # Track interactive state for session entries (expanded/collapsed)
+    _expanded_entries: set[int] = set()
 
     CSS = """
     Screen {
@@ -337,7 +351,8 @@ class ChatApp(App):  # type: ignore[misc]
         # Keep essential shortcuts that users expect
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+q", "quit", "Quit", show=False),
-        Binding("ctrl+d", "toggle_dark", "Theme", show=True),
+        # Removed Ctrl+D binding to avoid accidental quits and repurpose for theme toggle via palette
+        # Binding("ctrl+d", "toggle_dark", "Theme", show=True),
         # Keep most common actions as shortcuts
         Binding("f2", "toggle_tools", "Tools", show=True),
         Binding("ctrl+y", "copy_chat", "Copy", show=True),
@@ -430,7 +445,7 @@ class ChatApp(App):  # type: ignore[misc]
 
     def on_key(self, event: events.Key) -> None:
         # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
-        if event.key in ("ctrl+c", "ctrl+q", "ctrl+d"):
+        if event.key in ("ctrl+c", "ctrl+q"):
             event.prevent_default()
             event.stop()
             self.exit()
@@ -453,10 +468,10 @@ class ChatApp(App):  # type: ignore[misc]
         # Config persistence
         self.config = ConfigManager()
 
-        # Debug file setup
-        self._debug_dir = Path(".textual-debug")
-        self._debug_dir.mkdir(exist_ok=True)
+        # Session store (under XDG config sessions/), deprecates local .textual-debug
+        self._session_store = SessionStore(self.config)
         self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._session_path = self._session_store.start_session(self._session_id)
 
         # Runtime toggles - load from config with defaults
         self.auto_continue: bool = self.config.get("auto_continue", True)
@@ -485,29 +500,14 @@ class ChatApp(App):  # type: ignore[misc]
     def _write_tool_debug(
         self, tool_id: str, event_type: str, data: Dict[str, Any]
     ) -> None:
-        """Write detailed tool information to debug JSON file."""
+        """Append tool event to session store for persistent context."""
         try:
-            debug_file = self._debug_dir / f"tools_{self._session_id}.json"
-            timestamp = datetime.now().isoformat()
-
-            debug_entry = {
-                "timestamp": timestamp,
+            entry = {
                 "tool_id": tool_id,
                 "event_type": event_type,
                 "data": data,
             }
-
-            # Append to debug file
-            if debug_file.exists():
-                with open(debug_file, "r") as f:
-                    entries = json.load(f)
-            else:
-                entries = []
-
-            entries.append(debug_entry)
-
-            with open(debug_file, "w") as f:
-                json.dump(entries, f, indent=2, ensure_ascii=False)
+            self._session_store.add_event(entry)
         except Exception as e:
             logger.warning(f"Failed to write tool debug info: {e}")
 
@@ -625,7 +625,7 @@ class ChatApp(App):  # type: ignore[misc]
                 "[help]\n"
                 "Shortcuts:\n"
                 "  Ctrl+P  Command palette (search all commands)\n"
-                "  Ctrl+D  Toggle theme\n"
+                "  Ctrl+D  Toggle theme (via command palette)\n"
                 "  F2      Toggle Tools panel\n"
                 "  Ctrl+Y  Copy chat\n"
                 "  Ctrl+L  Clear chat\n"
@@ -670,12 +670,8 @@ class ChatApp(App):  # type: ignore[misc]
             logger.error(f"Error scrolling to end: {e}")
 
     def action_toggle_tools(self) -> None:
-        """Toggle the tool panel visibility."""
-        try:
-            tool_panel = self.query_one("#tool_panel", ToolPanel)
-            tool_panel.toggle_visibility()
-        except Exception as e:
-            logger.error(f"Error toggling tool panel: {e}")
+        """Tool panel removed; no-op for backward compatibility."""
+        pass
 
     def action_toggle_todo_panel(self) -> None:
         """Toggle the todo panel visibility."""
@@ -735,6 +731,56 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.error(f"Error rendering todos: {e}")
 
+    def action_list_sessions(self) -> None:
+        sessions = self._session_store.list_sessions()
+        if not sessions:
+            try:
+                chat = self.query_one("#chat", ChatView)
+                chat.append_block("[ok] No sessions found.")
+            except Exception:
+                pass
+            return
+        lines = ["[sessions]"]
+        for idx, s in enumerate(sessions):
+            lines.append(f"{idx + 1}. {s.id}  ({s.created:%Y-%m-%d %H:%M:%S})")
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.append_block("\n".join(lines))
+        except Exception:
+            pass
+
+    def action_resume_session(self) -> None:
+        # For now, resume the most recent session; later, add selection UI
+        sessions = self._session_store.list_sessions()
+        if not sessions:
+            try:
+                chat = self.query_one("#chat", ChatView)
+                chat.append_block("[error] No sessions to resume.")
+            except Exception:
+                pass
+            return
+        latest = sorted(sessions, key=lambda s: s.created)[-1]
+        self._session_store.resume_session(latest.id)
+        # Reconstruct messages and display context
+        msgs = self._session_store.reconstruct_messages(latest.id)
+        self.messages = msgs
+        try:
+            chat = self.query_one("#chat", ChatView)
+            chat.clear()
+            chat._current_text = ""
+            chat.append_block(f"[ok] Resumed session {latest.id}")
+            # Render messages quickly
+            for m in msgs:
+                role = m.get("role")
+                content = m.get("content", "")
+                if role == "user":
+                    chat.append_block(f"**You:**\n{content}")
+                else:
+                    chat.append_block(content)
+                chat.append_hr()
+        except Exception:
+            pass
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="hdr")
         yield Horizontal(
@@ -747,7 +793,8 @@ class ChatApp(App):  # type: ignore[misc]
                 ),
                 id="main_area",
             ),
-            ToolPanel(),
+            # Tool panel removed; tool details will be inline in main view
+            # ToolPanel(),
             TodoPanel(),
             id="content_area",
         )
@@ -763,6 +810,14 @@ class ChatApp(App):  # type: ignore[misc]
                 chat.append_block(f"**You:**\n{prompt}")
                 chat.append_hr()
                 self.messages.append({"role": "user", "content": prompt})
+                # Persist user prompt in session
+                try:
+                    self._session_store.add_event({
+                        "event_type": "user_prompt",
+                        "content": prompt,
+                    })
+                except Exception:
+                    pass
                 await self._run_auto_rounds(chat)
             except Exception as e:
                 logger.error(f"Worker error: {e}")
@@ -815,12 +870,7 @@ class ChatApp(App):  # type: ignore[misc]
             had_tools_this_round = False
             text_buf = ""
 
-            # Start new turn in tool panel
-            try:
-                tool_panel = self.query_one("#tool_panel", ToolPanel)
-                tool_panel.start_turn(rounds + 1)
-            except Exception:
-                pass  # Tool panel might not be mounted
+            # Start new turn - tool panel removed; inline rendering instead
 
             # Show working indicator
             try:
@@ -842,6 +892,13 @@ class ChatApp(App):  # type: ignore[misc]
                             else:
                                 # Buffer non-error text to avoid fragmentation
                                 text_buf += delta
+                                try:
+                                    self._session_store.add_event({
+                                        "event_type": "assistant_text",
+                                        "content": delta,
+                                    })
+                                except Exception:
+                                    pass
                     elif ctype == "tool_call":
                         tool_name = chunk.get("name", "unknown_tool")
                         tool_args = chunk.get("arguments", {})
@@ -853,13 +910,6 @@ class ChatApp(App):  # type: ignore[misc]
                             }
                             self._displayed_tool_calls.add(tool_id)
 
-                            # Update tool panel
-                            try:
-                                tool_panel = self.query_one("#tool_panel", ToolPanel)
-                                tool_panel.add_tool_call(tool_id, tool_name, tool_args)
-                            except Exception:
-                                pass  # Tool panel might not be mounted
-
                             # Write detailed info to debug file
                             self._write_tool_debug(
                                 tool_id,
@@ -867,13 +917,15 @@ class ChatApp(App):  # type: ignore[misc]
                                 {"name": tool_name, "arguments": tool_args},
                             )
 
-                        # Display simple clickable version in chat
-                        # Using a simple format that can be clicked to show in tool panel
-                        chat.write(f"🔧 {tool_name} called")
-                        chat.write("\n")
+                        # Inline indicator for tool call
+                        call_args_preview = json.dumps(tool_args)[:120]
+                        chat.append_block(
+                            f"[tool call] {tool_name} args: {call_args_preview}"
+                        )
                     elif ctype == "tool_result":
                         content = chunk.get("content", "")
                         tool_id = chunk.get("id", "")
+                        # Already persisted above
 
                         # Write detailed result to debug file
                         if tool_id:
@@ -885,14 +937,16 @@ class ChatApp(App):  # type: ignore[misc]
                         result_summary = self._get_result_summary(content)
                         chat.write(f"✅ Result: {result_summary}")
                         chat.write("\n")
+                        try:
+                            self._session_store.add_event({
+                                "event_type": "tool_result",
+                                "id": tool_id,
+                                "content": content,
+                            })
+                        except Exception:
+                            pass
 
-                        # Update tool panel with result
-                        if tool_id:
-                            try:
-                                tool_panel = self.query_one("#tool_panel", ToolPanel)
-                                tool_panel.update_tool_result(tool_id, result=content)
-                            except Exception:
-                                pass  # Tool panel might not be mounted
+                        # tool panel removed; rely on session-driven view and inline display
                     elif ctype == "append_message":
                         message = chunk.get("message", {})
                         if message:
@@ -1391,6 +1445,14 @@ class ChatApp(App):  # type: ignore[misc]
                 chat.append_block(f"**You:**\n{prompt}")
                 chat.append_hr()
                 self.messages.append({"role": "user", "content": prompt})
+                # Persist user prompt
+                try:
+                    self._session_store.add_event({
+                        "event_type": "user_prompt",
+                        "content": prompt,
+                    })
+                except Exception:
+                    pass
                 await self._run_auto_rounds(chat)
             try:
                 title = f"ChatApp - provider={type(self.provider).__name__.replace('Provider', '').lower()} model={self.provider.cfg.model} temp={self.provider.cfg.temperature} auto={self.auto_continue} rounds={self.max_rounds} pending={self._pending_count}"

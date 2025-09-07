@@ -42,12 +42,4 @@ async def test_ctrl_c_quits() -> None:
         assert app.is_running is False
 
 
-@pytest.mark.asyncio  # type: ignore[misc]
-async def test_ctrl_d_quits() -> None:
-    app = ChatApp(
-        provider=FakeProvider(ProviderConfig(model="x", api_key="x")), mcp_manager=None
-    )
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+d")
-        await asyncio.sleep(0)
-        assert app.is_running is False
+# Removed Ctrl+D quit behavior; theme toggling via palette instead
