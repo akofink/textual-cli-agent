@@ -1,0 +1,1 @@
+Devise and execute the roadmap toward building the most useful LLM-based CLI agent. Prioritize high-impact milestones, keep README/AGENTS/DEVELOPING/Roadmap synchronized with reality, and ensure every change ships with passing lint, type checks, tests (unit/integration/UI via Textual actor), and coverage enforcement.

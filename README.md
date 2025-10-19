@@ -11,6 +11,7 @@ A robust Textual-based CLI LLM agent with comprehensive error handling, MCP supp
 - **MCP client** to connect to servers via stdio and HTTP (gRPC scaffold provided)
 - **Comprehensive testing** with 58% coverage and defensive programming patterns
 - **Extensible design**: add your own providers, tools, and MCP transports
+- **Roadmap-driven**: transparent priorities tracked in `Roadmap.md`
 
 ## Quick start (using uv)
 
@@ -157,7 +158,7 @@ Providers implement a simple async interface in `textual_cli_agent/providers/bas
 
 ## Development
 
-See DEVELOPING.md for setup details and AGENTS.md for contributor guidelines.
+See DEVELOPING.md for setup details, AGENTS.md for contributor guidelines, and Roadmap.md for the current strategic plan. All changes must satisfy Ruff lint/format, mypy, pytest (including Textual UI tests where applicable), and coverage thresholds enforced by pre-commit hooks.
 
 ```bash
 uv sync --extra dev

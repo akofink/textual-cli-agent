@@ -1,6 +1,6 @@
 # Developing
 
-This project uses uv for environment management. Dev dependencies and pre-commit hooks are provided for maintaining high code quality.
+This project uses uv for environment management. Dev dependencies and pre-commit hooks are provided for maintaining high code quality. Review `Roadmap.md` before starting feature work to understand active milestones.
 
 ## Setup
 
@@ -15,7 +15,7 @@ This project maintains high code quality through:
 
 - **Pre-commit hooks**: Automatic formatting and linting on commit
 - **Type checking**: Full mypy coverage with strict type checking
-- **Test coverage**: 58% coverage with defensive error handling tests
+- **Test coverage**: ≥58% coverage with defensive error handling tests (threshold enforced via coverage configuration)
 - **Formatting**: Consistent code style with Ruff (formatter enabled)
 
 ## Running checks
@@ -31,6 +31,7 @@ uv run mypy .
 
 # Testing with coverage
 uv run pytest
+uv run pytest tests/textual  # UI tests powered by Textual's Pilot/Screenshotter when applicable
 uv run coverage report --show-missing
 
 # Run all pre-commit hooks
@@ -53,3 +54,4 @@ Coverage threshold is set to 55% in `pyproject.toml`.
 - Use `--prompt-stdin` to preload the UI after streaming the first response from stdin.
 - Use `--non-interactive` to run a single streamed response without launching the Textual UI.
 - MCP stdio processes are managed by the MCP SDK; pass your server command via `--mcp-stdio`.
+- Do not silence linter/type warnings; fix the underlying issue or adjust architecture per Roadmap guidance.
