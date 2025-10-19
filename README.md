@@ -147,7 +147,7 @@ Providers implement a simple async interface in `textual_cli_agent/providers/bas
 
 ## Development
 
-See DEVELOPING.md for full setup instructions.
+See DEVELOPING.md for setup details and AGENTS.md for contributor guidelines.
 
 ```bash
 uv sync --extra dev
