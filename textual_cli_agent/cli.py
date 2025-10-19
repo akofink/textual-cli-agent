@@ -97,6 +97,13 @@ def chat(
             "If you reach the round limit, you'll be given one final opportunity to respond without tools."
         )
 
+    # Adjust model defaults for provider-specific expectations
+    if provider_lower == "ollama":
+        # Most Ollama setups expose llama3.1 out of the box; fall back to it when the
+        # caller left the default OpenAI-oriented model value in place.
+        if model in ("gpt-5", "llama3"):
+            model = "llama3.1"
+
     prov = ProviderFactory.create(
         provider,
         ProviderConfig(
