@@ -1,11 +1,11 @@
 # textual-cli-agent
 
-A robust Textual-based CLI LLM agent with comprehensive error handling, MCP support, and pluggable Python tools. It supports popular model providers (OpenAI and Anthropic) out of the box, including GPT-5 (as a model name for OpenAI-compatible endpoints) and Claude 4 Sonnet.
+A robust Textual-based CLI LLM agent with comprehensive error handling, MCP support, and pluggable Python tools. It supports popular model providers (OpenAI, Anthropic, and Ollama) out of the box, including GPT-5 (as a model name for OpenAI-compatible endpoints) and Claude 4 Sonnet.
 
 ## Features
 
 - **Terminal UI** built with Textual with defensive error handling
-- **Provider-agnostic** agent core with adapters for OpenAI and Anthropic
+- **Provider-agnostic** agent core with adapters for OpenAI, Anthropic, and Ollama
 - **Robust error handling** with graceful degradation and timeout protection
 - **Tool calling** and Python tool registry via a simple decorator
 - **MCP client** to connect to servers via stdio and HTTP (gRPC scaffold provided)
@@ -32,6 +32,7 @@ uv run textual-cli-agent --help
 
 - `OPENAI_API_KEY` for OpenAI-compatible endpoints (includes OpenAI, Azure OpenAI with `--base-url`, local gateways)
 - `ANTHROPIC_API_KEY` for Anthropic (Claude)
+- Ollama runs locally by default and does not require an API key; use `--base-url` to point at a remote Ollama instance if needed.
 
 You can override with CLI flags.
 
@@ -68,6 +69,15 @@ Start a chat against Anthropic Claude 4 Sonnet (or your available Claude Sonnet 
 uv run textual-cli-agent chat \
   --provider anthropic \
   --model claude-4-sonnet \
+  --system "You are a helpful assistant"
+```
+
+Chat with a local Ollama model (the daemon must be running):
+
+```bash
+uv run textual-cli-agent chat \
+  --provider ollama \
+  --model llama3 \
   --system "You are a helpful assistant"
 ```
 
@@ -137,7 +147,7 @@ The agent will advertise your tools to the selected provider and automatically e
 
 ## Extending providers
 
-Providers implement a simple async interface in `textual_cli_agent/providers/base.py`. See `openai_provider.py` and `anthropic_provider.py` for reference. Add a new provider class and register it in `cli.py` if you need more.
+Providers implement a simple async interface in `textual_cli_agent/providers/base.py`. See `openai_provider.py`, `anthropic_provider.py`, and `ollama_provider.py` for reference. Add a new provider class and register it in `ProviderFactory` (and expose it via the CLI) if you need more.
 
 ## Limitations and notes
 

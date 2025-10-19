@@ -68,4 +68,8 @@ class ProviderFactory:
             from .anthropic_provider import AnthropicProvider
 
             return AnthropicProvider(cfg)
+        if lname == "ollama":
+            from .ollama_provider import OllamaProvider
+
+            return OllamaProvider(cfg)
         raise ValueError(f"Unknown provider: {name}")

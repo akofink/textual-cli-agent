@@ -388,7 +388,7 @@ class ChatApp(App):  # type: ignore[misc]
             # Recreate provider with new config, preserve class type
             prov_name = type(self.provider).__name__.replace("Provider", "").lower()
             # Try to infer factory
-            if prov_name in ("openai", "anthropic"):
+            if prov_name in ("openai", "anthropic", "ollama"):
                 new_provider = ProviderFactory.create(prov_name, cfg)
             else:
                 # Fallback to same class constructor
@@ -433,7 +433,11 @@ class ChatApp(App):  # type: ignore[misc]
                     system_prompt=self.provider.cfg.system_prompt,
                 )
 
-                if saved_provider and saved_provider in ("openai", "anthropic"):
+                if saved_provider and saved_provider in (
+                    "openai",
+                    "anthropic",
+                    "ollama",
+                ):
                     new_provider = ProviderFactory.create(saved_provider, cfg)
                 else:
                     # Just update config of existing provider
@@ -688,7 +692,7 @@ class ChatApp(App):  # type: ignore[misc]
             try:
                 pyperclip.copy(text)  # type: ignore[attr-defined]
                 success = True
-                # Visual feedback - could add a toast notification here
+                chat.append_block("[ok] Chat history copied to clipboard")
             except Exception:
                 pass
 
@@ -701,7 +705,7 @@ class ChatApp(App):  # type: ignore[misc]
                 filename = f"chat_export_{timestamp}.txt"
                 with open(filename, "w", encoding="utf-8") as f:
                     f.write(text)
-                # Could log success to chat view here
+                chat.append_block(f"[ok] Chat history exported to ./{filename}")
             except Exception as e:
                 logger.error(f"Error writing chat export file: {e}")
                 self.bell()  # Audio feedback for error
@@ -1179,7 +1183,7 @@ class ChatApp(App):  # type: ignore[misc]
                     "/help\n"
                     "/config\n"
                     "/model <name>\n"
-                    "/provider <openai|anthropic>\n"
+                    "/provider <openai|anthropic|ollama>\n"
                     "/temp <float>\n"
                     "/system <text>\n"
                     "/auto <on|off>\n"
@@ -1217,8 +1221,8 @@ class ChatApp(App):  # type: ignore[misc]
                 return True
             if cmd == "/provider" and args:
                 prov = args[0].lower()
-                if prov not in ("openai", "anthropic"):
-                    err("provider must be 'openai' or 'anthropic'")
+                if prov not in ("openai", "anthropic", "ollama"):
+                    err("provider must be 'openai', 'anthropic', or 'ollama'")
                     return True
                 try:
                     cfg = ProviderConfig(
@@ -1409,7 +1413,7 @@ class ChatApp(App):  # type: ignore[misc]
                     "Commands:\n"
                     "/help\n"
                     "/model <name>\n"
-                    "/provider <openai|anthropic>\n"
+                    "/provider <openai|anthropic|ollama>\n"
                     "/temp <float>\n"
                     "/system <text>\n"
                     "/auto <on|off>\n"
@@ -1428,8 +1432,8 @@ class ChatApp(App):  # type: ignore[misc]
                 return True
             if cmd == "/provider" and args:
                 prov = args[0].lower()
-                if prov not in ("openai", "anthropic"):
-                    err("provider must be 'openai' or 'anthropic'")
+                if prov not in ("openai", "anthropic", "ollama"):
+                    err("provider must be 'openai', 'anthropic', or 'ollama'")
                     return True
                 try:
                     cfg = ProviderConfig(

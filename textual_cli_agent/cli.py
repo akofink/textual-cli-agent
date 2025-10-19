@@ -22,7 +22,9 @@ def _env_default(key: str, default: Optional[str] = None) -> Optional[str]:
 
 @app.command()  # type: ignore[misc]
 def chat(
-    provider: str = typer.Option("openai", help="LLM provider: openai|anthropic|..."),
+    provider: str = typer.Option(
+        "openai", help="LLM provider: openai|anthropic|ollama|..."
+    ),
     model: str = typer.Option(
         "gpt-5", help="Model name, e.g., gpt-5, gpt-4o, claude-3-5-sonnet-20240620"
     ),
@@ -31,7 +33,7 @@ def chat(
         None, help="API key; defaults to provider env var"
     ),
     base_url: Optional[str] = typer.Option(
-        None, help="Override base URL for OpenAI-compatible endpoints"
+        None, help="Override base URL for OpenAI-compatible or Ollama endpoints"
     ),
     temperature: Optional[float] = typer.Option(
         None, help="Temperature; omit to use provider default"
@@ -55,14 +57,17 @@ def chat(
     """Start the Textual chat UI or run in headless mode with stdin prompt."""
 
     # Resolve provider configuration and API key from env
-    if provider.lower() == "openai":
+    provider_lower = provider.lower()
+    if provider_lower == "openai":
         api_key = api_key or _env_default("OPENAI_API_KEY")
-    elif provider.lower() == "anthropic":
+    elif provider_lower == "anthropic":
         api_key = api_key or _env_default("ANTHROPIC_API_KEY")
+    elif provider_lower == "ollama":
+        api_key = api_key or ""
     else:
         api_key = api_key or _env_default("API_KEY")
 
-    if not api_key:
+    if provider_lower != "ollama" and not api_key:
         console.print(
             "[red]No API key provided. Use --api-key or set provider env var.[/red]"
         )
@@ -96,7 +101,7 @@ def chat(
         provider,
         ProviderConfig(
             model=model,
-            api_key=api_key,
+            api_key=api_key or "",
             base_url=base_url,
             temperature=temperature,
             system_prompt=system,
