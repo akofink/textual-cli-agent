@@ -1,6 +1,6 @@
 # Developing
 
-This project uses uv for environment management. Dev dependencies and pre-commit hooks are provided for maintaining high code quality. Review `Roadmap.md` before starting feature work to understand active milestones.
+This project uses uv for environment management. Dev dependencies and pre-commit hooks are provided for maintaining high code quality. Review `Roadmap.md` before starting feature work to understand active milestones, and mirror the `.github/workflows/ci.yml` checks locally before opening a PR.
 
 ## Setup
 

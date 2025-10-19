@@ -158,7 +158,7 @@ Providers implement a simple async interface in `textual_cli_agent/providers/bas
 
 ## Development
 
-See DEVELOPING.md for setup details, AGENTS.md for contributor guidelines, and Roadmap.md for the current strategic plan. All changes must satisfy Ruff lint/format, mypy, pytest (including Textual UI tests where applicable), and coverage thresholds enforced by pre-commit hooks.
+See DEVELOPING.md for setup details, AGENTS.md for contributor guidelines, and Roadmap.md for the current strategic plan. Continuous integration runs via `.github/workflows/ci.yml`, which enforces Ruff lint/format, mypy, pytest (including coverage reports), and artifact upload. All changes must satisfy local hooks before push.
 
 ```bash
 uv sync --extra dev

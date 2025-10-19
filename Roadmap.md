@@ -31,6 +31,7 @@ Build the most useful LLM-powered CLI companion—fast, reliable, deeply extensi
 - ⬜ Enable coverage and test summaries in CI (scriptable via `uv run coverage`).
 
 ### Phase 1 — Experience & Reliability Enhancements
+Tracked in detail at `tasks/phase1_backlog.md`.
 1. **Streaming resilience**
    - Implement auto-reconnect streams, retry backoff per provider.
    - Tests: async integration tests mocking network flaps.

@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-This guide orients new contributors to the Textual-based CLI agent. It highlights repository layout, everyday workflows, and collaboration expectations. Consult `Roadmap.md` before starting work so efforts align with current priorities.
+This guide orients new contributors to the Textual-based CLI agent. It highlights repository layout, everyday workflows, and collaboration expectations. Consult `Roadmap.md` before starting work so efforts align with current priorities, and review backlog files such as `tasks/phase1_backlog.md` for detailed task expectations.
 
 ## Project Structure & Module Organization
 - `textual_cli_agent/` houses runtime code; `cli.py` wires the CLI, `engine.py` coordinates provider calls, and `context_manager.py` keeps session state.
@@ -14,7 +14,7 @@ This guide orients new contributors to the Textual-based CLI agent. It highlight
 - `uv run pytest` executes the Pytest suite (include Textual UI actor tests for widgets and panels); pair with `uv run coverage report --show-missing` for visibility.
 - `uv run ruff check .` and `uv run ruff format --check .` enforce linting and formatting.
 - `uv run mypy .` runs strict type checking; keep new modules clean.
-- `uv run pre-commit run --all-files` is the final gate; hooks must pass before submitting a PR. Never bypass hooks—they mirror CI requirements.
+- `uv run pre-commit run --all-files` is the final gate; hooks must pass before submitting a PR. Never bypass hooks—they mirror the `.github/workflows/ci.yml` pipeline requirements.
 
 ## Coding Style & Naming Conventions
 Use 4-space indentation, type annotations, and Ruff-compatible formatting (Black-like layout, double quotes). Prefer snake_case for functions and variables, PascalCase for classes, and CLI command names that mirror module filenames. Keep log messages actionable and include provider or tool names when relevant.
