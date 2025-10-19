@@ -24,7 +24,7 @@ async def test_ollama_provider_build_assistant_message():
     tool_call = msg["tool_calls"][0]
     assert tool_call["id"] == "call_1"
     assert tool_call["function"]["name"] == "add"
-    assert tool_call["function"]["arguments"] == '{"a": 1, "b": 2}'
+    assert tool_call["function"]["arguments"] == {"a": 1, "b": 2}
 
 
 @pytest.mark.asyncio

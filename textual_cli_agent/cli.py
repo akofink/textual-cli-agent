@@ -118,28 +118,34 @@ def chat(
 
         engine = AgentEngine(prov, mcp_mgr)
         messages = [{"role": "user", "content": prompt}]
-        # Stream to stdout
-        async for chunk in engine.run_stream(messages):
-            ctype = chunk.get("type")
-            if ctype == "text":
-                sys.stdout.write(chunk.get("delta", ""))
-                sys.stdout.flush()
-            elif ctype == "tool_call":
-                # simple stderr note to keep stdout clean
-                console.print(
-                    f"[cyan][tool call][/cyan] {chunk['name']}({chunk.get('arguments', {})})",
-                    highlight=False,
-                )
-            elif ctype == "tool_result":
-                console.print(
-                    f"[magenta][tool result][/magenta] {chunk['content']}",
-                    highlight=False,
-                )
-            elif ctype == "append_message":
-                messages.append(chunk["message"])
-            elif ctype == "round_complete":
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+        # Stream to stdout, automatically continuing through tool-call rounds.
+        while True:
+            had_tool_calls = False
+            async for chunk in engine.run_stream(messages):
+                ctype = chunk.get("type")
+                if ctype == "text":
+                    sys.stdout.write(chunk.get("delta", ""))
+                    sys.stdout.flush()
+                elif ctype == "tool_call":
+                    had_tool_calls = True
+                    console.print(
+                        f"[cyan][tool call][/cyan] {chunk['name']}({chunk.get('arguments', {})})",
+                        highlight=False,
+                    )
+                elif ctype == "tool_result":
+                    console.print(
+                        f"[magenta][tool result][/magenta] {chunk['content']}",
+                        highlight=False,
+                    )
+                elif ctype == "append_message":
+                    messages.append(chunk["message"])
+                elif ctype == "round_complete":
+                    had_tool_calls = bool(chunk.get("had_tool_calls", had_tool_calls))
+                    if not had_tool_calls:
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    break
+            if not had_tool_calls:
                 break
         return 0
 
@@ -176,18 +182,27 @@ def chat(
                 engine = AgentEngine(prov, mcp_mgr)
                 initial_messages = [{"role": "user", "content": prompt}]
                 initial_markdown = f"**You:** {prompt}\n\n"
-                async for chunk in engine.run_stream(initial_messages):
-                    ctype = chunk.get("type")
-                    if ctype == "text":
-                        initial_markdown += chunk.get("delta", "")
-                    elif ctype == "tool_call":
-                        initial_markdown += f"[tool call] {chunk['name']}({chunk.get('arguments', {})})\n"
-                    elif ctype == "tool_result":
-                        initial_markdown += f"[tool result] {chunk['content']}\n"
-                    elif ctype == "append_message":
-                        initial_messages.append(chunk["message"])
-                    elif ctype == "round_complete":
-                        initial_markdown += "\n---\n"
+                while True:
+                    had_tool_calls = False
+                    async for chunk in engine.run_stream(initial_messages):
+                        ctype = chunk.get("type")
+                        if ctype == "text":
+                            initial_markdown += chunk.get("delta", "")
+                        elif ctype == "tool_call":
+                            had_tool_calls = True
+                            initial_markdown += f"[tool call] {chunk['name']}({chunk.get('arguments', {})})\n"
+                        elif ctype == "tool_result":
+                            initial_markdown += f"[tool result] {chunk['content']}\n"
+                        elif ctype == "append_message":
+                            initial_messages.append(chunk["message"])
+                        elif ctype == "round_complete":
+                            had_tool_calls = bool(
+                                chunk.get("had_tool_calls", had_tool_calls)
+                            )
+                            if not had_tool_calls:
+                                initial_markdown += "\n---\n"
+                            break
+                    if not had_tool_calls:
                         break
                 await run_textual_chat(
                     provider=prov,

@@ -176,7 +176,33 @@ class OllamaProvider(Provider):
         async with httpx.AsyncClient(timeout=timeout) as client:
             try:
                 async with client.stream("POST", url, json=payload) as response:
-                    response.raise_for_status()
+                    if response.status_code >= 400:
+                        body_bytes = await response.aread()
+                        response_detail: Optional[str] = None
+                        if body_bytes:
+                            try:
+                                decoded = body_bytes.decode("utf-8")
+                                detail_json = json.loads(decoded)
+                                if isinstance(detail_json, dict):
+                                    response_detail = detail_json.get(
+                                        "error"
+                                    ) or detail_json.get("message")
+                                    if response_detail is None:
+                                        response_detail = json.dumps(detail_json)
+                                else:
+                                    response_detail = str(detail_json)
+                            except Exception:
+                                response_detail = body_bytes.decode(
+                                    "utf-8", errors="ignore"
+                                ).strip()
+                        error_msg = (
+                            f"Ollama HTTP error {response.status_code}: {response_detail}"
+                            if response_detail
+                            else f"Ollama HTTP error {response.status_code}"
+                        )
+                        logger.error(error_msg)
+                        raise RuntimeError(error_msg)
+
                     async for line in response.aiter_lines():
                         if not line:
                             continue
@@ -187,29 +213,40 @@ class OllamaProvider(Provider):
                             continue
             except httpx.HTTPStatusError as http_err:
                 status = http_err.response.status_code
-                detail: Optional[str] = None
+                # Ensure the streaming response body is fully read before accessing it.
+                try:
+                    await http_err.response.aread()
+                except Exception:
+                    pass
+                error_detail: Optional[str] = None
                 try:
                     payload = http_err.response.json()
                     if isinstance(payload, dict):
-                        detail = payload.get("error") or payload.get("message")
-                        if detail is None:
-                            detail = json.dumps(payload)
+                        error_detail = payload.get("error") or payload.get("message")
+                        if error_detail is None:
+                            error_detail = json.dumps(payload)
                     else:
-                        detail = str(payload)
+                        error_detail = str(payload)
                 except ValueError:
                     try:
-                        detail = http_err.response.text.strip() or None
+                        error_detail = http_err.response.text.strip() or None
                     except Exception:
-                        detail = None
+                        error_detail = None
 
                 error_msg = (
-                    f"Ollama HTTP error {status}: {detail}"
-                    if detail
+                    f"Ollama HTTP error {status}: {error_detail}"
+                    if error_detail
                     else f"Ollama HTTP error {status}"
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from http_err
             except httpx.HTTPError as http_err:
+                resp = getattr(http_err, "response", None)
+                if resp is not None:
+                    try:
+                        await resp.aread()
+                    except Exception:
+                        pass
                 logger.error(f"Ollama HTTP error: {http_err}")
                 raise
 
@@ -220,12 +257,19 @@ class OllamaProvider(Provider):
         if tool_calls:
             formatted_calls = []
             for call in tool_calls:
+                args = call.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        # Leave as-is; Ollama expects object and will report error if invalid.
+                        logger.debug(f"Ollama tool args were string: {args!r}")
                 formatted_calls.append({
                     "id": call.get("id", ""),
                     "type": "function",
                     "function": {
                         "name": call.get("name", ""),
-                        "arguments": json.dumps(call.get("arguments", {})),
+                        "arguments": args,
                     },
                 })
             message["tool_calls"] = formatted_calls

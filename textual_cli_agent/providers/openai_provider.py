@@ -130,84 +130,110 @@ class OpenAIProvider(Provider):
             emitted: Set[int] = set()
 
             try:
-                async for event in stream:
-                    try:
-                        if (
-                            not event
-                            or not hasattr(event, "choices")
-                            or not event.choices
-                        ):
-                            continue
 
-                        choice = event.choices[0]
-                        if (
-                            not choice
-                            or not hasattr(choice, "delta")
-                            or not choice.delta
-                        ):
-                            continue
+                async def _iterate(event_iter):
+                    async for event in event_iter:
+                        try:
+                            if (
+                                not event
+                                or not hasattr(event, "choices")
+                                or not event.choices
+                            ):
+                                continue
 
-                        delta = choice.delta
-                        # Text delta
-                        if hasattr(delta, "content") and delta.content:
-                            yield {"type": "text", "delta": delta.content}
-                        # Tool call incremental updates
-                        if hasattr(delta, "tool_calls") and delta.tool_calls:
-                            for tc in delta.tool_calls:
-                                try:
-                                    idx = getattr(tc, "index", 0)
-                                    # accumulate ids / names
-                                    if hasattr(tc, "id") and tc.id:
-                                        id_buf[idx] = tc.id
-                                    func = getattr(tc, "function", None)
-                                    if func is not None:
-                                        if hasattr(func, "name") and func.name:
-                                            name_buf[idx] = func.name
+                            choice = event.choices[0]
+                            if (
+                                not choice
+                                or not hasattr(choice, "delta")
+                                or not choice.delta
+                            ):
+                                continue
+
+                            delta = choice.delta
+                            # Text delta
+                            if hasattr(delta, "content") and delta.content:
+                                yield {"type": "text", "delta": delta.content}
+                            # Tool call incremental updates
+                            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                                for tc in delta.tool_calls:
+                                    try:
+                                        idx = getattr(tc, "index", 0)
+                                        # accumulate ids / names
+                                        if hasattr(tc, "id") and tc.id:
+                                            id_buf[idx] = tc.id
+                                        func = getattr(tc, "function", None)
+                                        if func is not None:
+                                            if hasattr(func, "name") and func.name:
+                                                name_buf[idx] = func.name
+                                            if (
+                                                hasattr(func, "arguments")
+                                                and func.arguments
+                                            ):
+                                                arg_buf[idx] = arg_buf.get(idx, "") + (
+                                                    func.arguments or ""
+                                                )
+                                        # Try to emit only when we can parse full JSON
                                         if (
-                                            hasattr(func, "arguments")
-                                            and func.arguments
+                                            idx not in emitted
+                                            and idx in arg_buf
+                                            and arg_buf[idx].strip()
                                         ):
-                                            arg_buf[idx] = arg_buf.get(idx, "") + (
-                                                func.arguments or ""
-                                            )
-                                    # Try to emit only when we can parse full JSON
-                                    if (
-                                        idx not in emitted
-                                        and idx in arg_buf
-                                        and arg_buf[idx].strip()
-                                    ):
-                                        try:
-                                            args_obj = json.loads(arg_buf[idx])
-                                            name = (
-                                                name_buf.get(idx)
-                                                or f"unknown_tool_{idx}"
-                                            )
-                                            call_id = id_buf.get(idx) or f"call_{idx}"
-                                            emitted.add(idx)
-                                            yield {
-                                                "type": "tool_call",
-                                                "id": call_id,
-                                                "name": name,
-                                                "arguments": args_obj,
-                                            }
-                                        except json.JSONDecodeError as je:
-                                            logger.debug(
-                                                f"JSON decode error for tool call {idx}: {je}. Buffer: {arg_buf[idx]}"
-                                            )
-                                            continue  # wait for more deltas
-                                        except Exception as e:
-                                            logger.error(
-                                                f"Error processing tool call {idx}: {e}"
-                                            )
-                                            continue
-                                except Exception as e:
-                                    logger.error(
-                                        f"Error processing tool call delta: {e}"
-                                    )
-                                    continue
-                    except Exception as e:
-                        logger.error(f"Error processing stream event: {e}")
-                        continue
+                                            try:
+                                                args_obj = json.loads(arg_buf[idx])
+                                                name = (
+                                                    name_buf.get(idx)
+                                                    or f"unknown_tool_{idx}"
+                                                )
+                                                call_id = (
+                                                    id_buf.get(idx) or f"call_{idx}"
+                                                )
+                                                emitted.add(idx)
+                                                yield {
+                                                    "type": "tool_call",
+                                                    "id": call_id,
+                                                    "name": name,
+                                                    "arguments": args_obj,
+                                                }
+                                            except json.JSONDecodeError as je:
+                                                logger.debug(
+                                                    f"JSON decode error for tool call {idx}: {je}. Buffer: {arg_buf[idx]}"
+                                                )
+                                                continue  # wait for more deltas
+                                            except Exception as e:
+                                                logger.error(
+                                                    f"Error processing tool call {idx}: {e}"
+                                                )
+                                                continue
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Error processing tool call delta: {e}"
+                                        )
+                                        continue
+                        except Exception as e:
+                            logger.error(f"Error processing stream event: {e}")
+                            continue
+
+                # Prefer async context manager if the stream provides one so the HTTP
+                # response is properly closed even on early exits.
+                enter = getattr(type(stream), "__aenter__", None)
+                exit_ = getattr(type(stream), "__aexit__", None)
+
+                use_async_cm = False
+                if enter is not None and exit_ is not None and callable(enter):
+                    import inspect as _inspect
+
+                    if _inspect.iscoroutinefunction(
+                        enter
+                    ) and _inspect.iscoroutinefunction(exit_):
+                        use_async_cm = True
+
+                if use_async_cm:
+                    async with stream:
+                        async for item in _iterate(stream):
+                            yield item
+                else:
+                    async for item in _iterate(stream):
+                        yield item
             except Exception as e:
                 logger.error(f"Error during stream processing: {e}")
 
