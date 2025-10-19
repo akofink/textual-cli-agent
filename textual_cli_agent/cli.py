@@ -120,7 +120,9 @@ def chat(
     # Setup MCP manager
     mcp_mgr = McpManager()
 
-    async def _headless_single(prompt: str) -> int:
+    async def _headless_single(
+        prompt: str,
+    ) -> int:  # pragma: no cover - requires live provider
         from .engine import AgentEngine
 
         engine = AgentEngine(prov, mcp_mgr)
@@ -161,7 +163,9 @@ def chat(
                 break
         return 0
 
-    async def _async_main() -> None:
+    async def _async_main() -> (
+        None
+    ):  # pragma: no cover - orchestrates live chat session
         await mcp_mgr.start(
             stdio_cmds=mcp_stdio, http_urls=mcp_http, grpc_endpoints=mcp_grpc
         )
@@ -239,4 +243,4 @@ def chat(
         finally:
             await mcp_mgr.stop()
 
-    asyncio.run(_async_main())
+    asyncio.run(_async_main())  # pragma: no cover - integration path

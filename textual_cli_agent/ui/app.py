@@ -24,6 +24,8 @@ from textual.command import Hit, Hits, Provider as CommandProvider
 from functools import partial
 from rich.markdown import Markdown
 from rich.text import Text
+from textual.selection import Selection
+from textual.strip import Strip
 
 from ..engine import AgentEngine
 from ..providers.base import Provider, ProviderConfig, ProviderFactory
@@ -154,21 +156,22 @@ class ChatView(RichLog):  # type: ignore[misc]
     def get_text(self) -> str:
         """Get all text content for copying."""
         # Extract plain text from all the Rich renderables
-        lines = []
         try:
-            # Access the internal lines if possible for text extraction
-            if hasattr(self, "_lines"):
-                for line in self._lines:
+            if getattr(self, "lines", None):
+                return "\n".join(strip.text for strip in self.lines)
+            internal_lines = getattr(self, "_lines", None)
+            if internal_lines is not None:
+                collected = []
+                for line in internal_lines:
                     if hasattr(line, "plain"):
-                        lines.append(line.plain)
+                        collected.append(line.plain)
                     else:
-                        lines.append(str(line))
-            else:
-                # Fallback to current text buffer
-                lines.append(self._current_text)
+                        collected.append(str(line))
+                if collected:
+                    return "\n".join(collected)
         except Exception:
-            lines.append(self._current_text)
-        return "\n".join(lines)
+            pass
+        return self._current_text
 
     def append_text(self, text: str) -> None:
         """Append streaming text with sane wrapping."""
@@ -204,6 +207,59 @@ class ChatView(RichLog):  # type: ignore[misc]
                 self.write("\n---\n")
             except Exception:
                 pass
+
+    @property
+    def allow_select(self) -> bool:  # type: ignore[override]
+        return True
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        """Provide the currently selected text to Textual's selection system."""
+        try:
+            lines = [strip.text for strip in self.lines]
+        except Exception:
+            lines = []
+        if not lines:
+            return None
+        extracted = selection.extract("\n".join(lines))
+        if not extracted:
+            return None
+        return extracted, "\n"
+
+    def selection_updated(self, selection: Selection | None) -> None:
+        self._line_cache.clear()
+        self.refresh()
+
+    def _render_line(self, y: int, scroll_x: int, width: int) -> Strip:
+        base_line = super()._render_line(y, scroll_x, width)
+        line = base_line
+        selection = self.text_selection
+
+        if selection is not None:
+            span = selection.get_span(y)
+            if span is not None and line.cell_length > 0:
+                start, end = span
+                if end == -1:
+                    end = scroll_x + line.cell_length
+
+                highlight_start = max(start - scroll_x, 0)
+                highlight_end = min(end - scroll_x, line.cell_length)
+
+                if highlight_end > highlight_start:
+                    selection_style = self.screen.get_component_rich_style(
+                        "screen--selection"
+                    )
+                    parts: list[Strip] = []
+                    if highlight_start > 0:
+                        parts.append(line.crop(0, highlight_start))
+                    highlighted = line.crop(highlight_start, highlight_end).apply_style(
+                        selection_style
+                    )
+                    parts.append(highlighted)
+                    if highlight_end < line.cell_length:
+                        parts.append(line.crop(highlight_end, line.cell_length))
+                    line = Strip.join(parts)
+
+        return line.apply_offsets(scroll_x, y)
 
 
 class ChatApp(App):  # type: ignore[misc]
@@ -573,19 +629,15 @@ class ChatApp(App):  # type: ignore[misc]
             return
         parsed_args = self._parse_tool_payload(raw_args)
         self._tool_calls_by_id[tool_id] = {"name": name, "arguments": parsed_args}
-        if tool_id not in self._displayed_tool_calls:
-            panel = self._get_tool_panel()
-            if panel:
-                call_args = (
-                    parsed_args
-                    if isinstance(parsed_args, dict)
-                    else {"value": parsed_args}
-                )
-                try:
-                    panel.add_tool_call(tool_id, name, call_args)
-                except Exception as e:
-                    logger.debug(f"Failed to add tool call {tool_id} to panel: {e}")
-            self._displayed_tool_calls.add(tool_id)
+        panel = self._get_tool_panel()
+        if panel:
+            call_args = (
+                parsed_args if isinstance(parsed_args, dict) else {"value": parsed_args}
+            )
+            try:
+                panel.add_tool_call(tool_id, name, call_args)
+            except Exception as e:
+                logger.debug(f"Failed to add tool call {tool_id} to panel: {e}")
         if tool_id in self._pending_tool_results:
             content = self._pending_tool_results.pop(tool_id)
             self._apply_tool_result(tool_id, content)
@@ -595,7 +647,7 @@ class ChatApp(App):  # type: ignore[misc]
             return
         parsed_content = self._parse_tool_payload(raw_content)
         self._pending_tool_results[tool_id] = parsed_content
-        if tool_id in self._displayed_tool_calls:
+        if tool_id in self._tool_calls_by_id:
             content = self._pending_tool_results.pop(tool_id, parsed_content)
             self._apply_tool_result(tool_id, content)
 
@@ -642,7 +694,6 @@ class ChatApp(App):  # type: ignore[misc]
         self._pending_count: int = 0
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         # Tool call/result ordering tracking
-        self._displayed_tool_calls: set[str] = set()
         self._pending_tool_results: Dict[str, Any] = {}
         self._tool_turn_counter: int = 0
         self._tool_panel_widget: Optional[ToolPanel] = None
@@ -816,6 +867,20 @@ class ChatApp(App):  # type: ignore[misc]
                     logger.debug(
                         f"Tool details copy check failed, falling back to chat copy: {e}"
                     )
+
+        try:
+            chat = self.query_one("#chat", ChatView)
+            selection = chat.text_selection
+            if selection:
+                selection_text = chat.get_selection(selection)
+                if selection_text:
+                    text, _ = selection_text
+                    if self._copy_text_to_clipboard(
+                        text, "[ok] Selection copied to clipboard"
+                    ):
+                        return
+        except Exception as e:
+            logger.debug(f"Selection copy fallback failed: {e}")
 
         self.action_copy_chat()
 

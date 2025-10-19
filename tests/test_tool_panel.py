@@ -78,6 +78,20 @@ async def test_tool_panel_clears_missing_selection() -> None:
         assert "Select a tool call" in details.text
 
 
+@pytest.mark.asyncio
+async def test_tool_panel_updates_existing_call_args() -> None:
+    app = ToolPanelTestApp()
+    async with app.run_test():
+        panel = app.panel
+        panel.start_turn(1)
+        panel.add_tool_call("call_1", "demo", {"value": 1})
+        panel.add_tool_call("call_1", "demo", {"value": 2})
+
+        assert len(panel.current_turn.calls) == 1
+        call = panel.current_turn.calls[0]
+        assert call.args == {"value": 2}
+
+
 def test_format_tool_call_details_includes_error() -> None:
     call = ToolCall(
         id="xyz",

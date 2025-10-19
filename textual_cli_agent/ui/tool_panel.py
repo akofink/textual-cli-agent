@@ -136,6 +136,14 @@ class ToolPanel(Container):
         if not self.current_turn:
             self.start_turn(len(self.turns))
 
+        existing = self._find_tool_call(call_id)
+        if existing:
+            existing.args = args
+            if self._selected_call_id == call_id:
+                self._show_call_details(existing)
+            self._update_tree()
+            return
+
         if self.current_turn:  # Type guard for mypy
             tool_call = ToolCall(id=call_id, name=name, args=args)
             self.current_turn.calls.append(tool_call)
