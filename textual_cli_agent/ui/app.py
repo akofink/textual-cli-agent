@@ -22,6 +22,7 @@ from ..mcp.client import McpManager
 from ..config import ConfigManager
 from ..session_store import SessionStore
 from .todo_panel import TodoPanel
+from .tool_panel import ToolPanel
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,8 @@ class ChatApp(App):  # type: ignore[misc]
 
     provider: Provider
     engine: AgentEngine
+    _tool_panel_widget: Optional[ToolPanel]
+    _todo_panel_widget: Optional[TodoPanel]
 
     # Add our custom command provider to the command palette
     COMMANDS = App.COMMANDS | {ChatCommands}
@@ -355,6 +358,7 @@ class ChatApp(App):  # type: ignore[misc]
         # Binding("ctrl+d", "toggle_dark", "Theme", show=True),
         # Keep most common actions as shortcuts
         Binding("f2", "toggle_tools", "Tools", show=True),
+        Binding("f3", "toggle_todo_panel", "Todos", show=True),
         Binding("ctrl+y", "copy_chat", "Copy", show=True),
         Binding("ctrl+l", "clear_chat", "Clear", show=True),
         # Navigation shortcuts
@@ -443,6 +447,86 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.warning(f"Failed to apply saved provider config: {e}")
 
+    def _get_tool_panel(self) -> Optional[ToolPanel]:
+        panel = self._tool_panel_widget
+        if panel and panel.app:
+            return panel
+        try:
+            panel = self.query_one("#tool_panel", ToolPanel)
+            self._tool_panel_widget = panel
+            return panel
+        except Exception:
+            return None
+
+    def _get_todo_panel(self) -> Optional[TodoPanel]:
+        panel = self._todo_panel_widget
+        if panel and panel.app:
+            return panel
+        try:
+            panel = self.query_one("#todo_panel", TodoPanel)
+            self._todo_panel_widget = panel
+            return panel
+        except Exception:
+            return None
+
+    def _parse_tool_payload(self, payload: Any) -> Any:
+        if isinstance(payload, str):
+            try:
+                return json.loads(payload)
+            except Exception:
+                return payload
+        return payload
+
+    def _apply_tool_result(self, tool_id: str, content: Any) -> None:
+        if not tool_id:
+            return
+        if tool_id in self._tool_calls_by_id:
+            self._tool_calls_by_id[tool_id]["result"] = content
+        panel = self._get_tool_panel()
+        if not panel:
+            return
+        error_text: Optional[str] = None
+        if isinstance(content, dict) and "error" in content:
+            error_text = str(content.get("error"))
+        try:
+            if error_text:
+                panel.update_tool_result(tool_id, error=error_text)
+            else:
+                panel.update_tool_result(tool_id, result=content)
+        except Exception as e:
+            logger.debug(f"Failed to update tool panel result for {tool_id}: {e}")
+
+    def _record_tool_call(self, tool_id: str, name: str, raw_args: Any) -> None:
+        if not tool_id:
+            return
+        parsed_args = self._parse_tool_payload(raw_args)
+        self._tool_calls_by_id[tool_id] = {"name": name, "arguments": parsed_args}
+        if tool_id not in self._displayed_tool_calls:
+            panel = self._get_tool_panel()
+            if panel:
+                call_args = (
+                    parsed_args
+                    if isinstance(parsed_args, dict)
+                    else {"value": parsed_args}
+                )
+                try:
+                    panel.add_tool_call(tool_id, name, call_args)
+                except Exception as e:
+                    logger.debug(f"Failed to add tool call {tool_id} to panel: {e}")
+            self._displayed_tool_calls.add(tool_id)
+        if tool_id in self._pending_tool_results:
+            content = self._pending_tool_results.pop(tool_id)
+            self._apply_tool_result(tool_id, content)
+
+    def _record_tool_result(self, tool_id: str, raw_content: Any) -> None:
+        if not tool_id:
+            return
+        parsed_content = self._parse_tool_payload(raw_content)
+        self._pending_tool_results[tool_id] = parsed_content
+        if tool_id in self._displayed_tool_calls:
+            content = self._pending_tool_results.pop(tool_id, parsed_content)
+            self._apply_tool_result(tool_id, content)
+
     def on_key(self, event: events.Key) -> None:
         # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
         if event.key in ("ctrl+c", "ctrl+q"):
@@ -482,6 +566,10 @@ class ChatApp(App):  # type: ignore[misc]
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         # Tool call/result ordering tracking
         self._displayed_tool_calls: set[str] = set()
+        self._pending_tool_results: Dict[str, Any] = {}
+        self._tool_turn_counter: int = 0
+        self._tool_panel_widget: Optional[ToolPanel] = None
+        self._todo_panel_widget: Optional[TodoPanel] = None
         # Simple TODO list pane
         self._todos: List[str] = []
         self._show_todo: bool = self.config.get("show_todo", False)
@@ -670,14 +758,25 @@ class ChatApp(App):  # type: ignore[misc]
             logger.error(f"Error scrolling to end: {e}")
 
     def action_toggle_tools(self) -> None:
-        """Tool panel removed; no-op for backward compatibility."""
-        pass
+        panel = self._get_tool_panel()
+        if not panel:
+            logger.warning("Tool panel is not available to toggle")
+            return
+        try:
+            panel.toggle_visibility()
+        except Exception as e:
+            logger.error(f"Error toggling tool panel: {e}")
 
     def action_toggle_todo_panel(self) -> None:
         """Toggle the todo panel visibility."""
+        panel = self._get_todo_panel()
+        if not panel:
+            logger.warning("Todo panel is not available to toggle")
+            return
         try:
-            todo_panel = self.query_one("#todo_panel", TodoPanel)
-            todo_panel.toggle_visibility()
+            panel.toggle_visibility()
+            if panel.visible:
+                panel.update_todos(self._todos)
         except Exception as e:
             logger.error(f"Error toggling todo panel: {e}")
 
@@ -723,11 +822,12 @@ class ChatApp(App):  # type: ignore[misc]
             chat.append_block("\n".join(lines))
 
             # Also update the todo panel if it exists
-            try:
-                todo_panel = self.query_one("#todo_panel", TodoPanel)
-                todo_panel.update_todos(self._todos)
-            except Exception:
-                pass  # Todo panel might not be mounted
+            todo_panel = self._get_todo_panel()
+            if todo_panel:
+                try:
+                    todo_panel.update_todos(self._todos)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Error rendering todos: {e}")
 
@@ -782,6 +882,10 @@ class ChatApp(App):  # type: ignore[misc]
             pass
 
     def compose(self) -> ComposeResult:
+        tool_panel = ToolPanel()
+        todo_panel = TodoPanel()
+        self._tool_panel_widget = tool_panel
+        self._todo_panel_widget = todo_panel
         yield Header(show_clock=True, id="hdr")
         yield Horizontal(
             Vertical(
@@ -793,9 +897,8 @@ class ChatApp(App):  # type: ignore[misc]
                 ),
                 id="main_area",
             ),
-            # Tool panel removed; tool details will be inline in main view
-            # ToolPanel(),
-            TodoPanel(),
+            tool_panel,
+            todo_panel,
             id="content_area",
         )
         yield Static("Idle", id="status_bar", classes="status")
@@ -870,7 +973,16 @@ class ChatApp(App):  # type: ignore[misc]
             had_tools_this_round = False
             text_buf = ""
 
-            # Start new turn - tool panel removed; inline rendering instead
+            self._tool_turn_counter += 1
+            current_turn_id = self._tool_turn_counter
+            panel = self._get_tool_panel()
+            if panel:
+                try:
+                    panel.start_turn(current_turn_id)
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to start tool panel turn {current_turn_id}: {e}"
+                    )
 
             # Show working indicator
             try:
@@ -901,24 +1013,25 @@ class ChatApp(App):  # type: ignore[misc]
                                     pass
                     elif ctype == "tool_call":
                         tool_name = chunk.get("name", "unknown_tool")
-                        tool_args = chunk.get("arguments", {})
+                        parsed_args = self._parse_tool_payload(
+                            chunk.get("arguments", {})
+                        )
                         tool_id = chunk.get("id", "")
                         if tool_id:
-                            self._tool_calls_by_id[tool_id] = {
-                                "name": tool_name,
-                                "arguments": tool_args,
-                            }
-                            self._displayed_tool_calls.add(tool_id)
-
-                            # Write detailed info to debug file
-                            self._write_tool_debug(
-                                tool_id,
-                                "call",
-                                {"name": tool_name, "arguments": tool_args},
-                            )
+                            already_recorded = tool_id in self._tool_calls_by_id
+                            self._record_tool_call(tool_id, tool_name, parsed_args)
+                            if not already_recorded:
+                                self._write_tool_debug(
+                                    tool_id,
+                                    "call",
+                                    {"name": tool_name, "arguments": parsed_args},
+                                )
 
                         # Inline indicator for tool call
-                        call_args_preview = json.dumps(tool_args)[:120]
+                        try:
+                            call_args_preview = json.dumps(parsed_args)[:120]
+                        except Exception:
+                            call_args_preview = str(parsed_args)[:120]
                         chat.append_block(
                             f"[tool call] {tool_name} args: {call_args_preview}"
                         )
@@ -927,14 +1040,17 @@ class ChatApp(App):  # type: ignore[misc]
                         tool_id = chunk.get("id", "")
                         # Already persisted above
 
+                        parsed_content = self._parse_tool_payload(content)
+
                         # Write detailed result to debug file
                         if tool_id:
                             self._write_tool_debug(
                                 tool_id, "result", {"content": content}
                             )
+                            self._record_tool_result(tool_id, parsed_content)
 
                         # Display simple result indicator in chat
-                        result_summary = self._get_result_summary(content)
+                        result_summary = self._get_result_summary(parsed_content)
                         chat.write(f"✅ Result: {result_summary}")
                         chat.write("\n")
                         try:
@@ -946,7 +1062,6 @@ class ChatApp(App):  # type: ignore[misc]
                         except Exception:
                             pass
 
-                        # tool panel removed; rely on session-driven view and inline display
                     elif ctype == "append_message":
                         message = chunk.get("message", {})
                         if message:
@@ -954,16 +1069,38 @@ class ChatApp(App):  # type: ignore[misc]
                                 "tool_calls"
                             ):
                                 calls = message.get("tool_calls") or []
-                                pretty_calls = [
-                                    {
-                                        "id": c.get("id"),
-                                        "name": (c.get("function") or {}).get("name"),
-                                        "arguments": (c.get("function") or {}).get(
-                                            "arguments"
-                                        ),
-                                    }
-                                    for c in calls
-                                ]
+                                pretty_calls = []
+                                for call in calls:
+                                    function_data = call.get("function") or {}
+                                    call_id = call.get("id", "")
+                                    call_name = function_data.get(
+                                        "name", "unknown_tool"
+                                    )
+                                    raw_arguments = function_data.get("arguments")
+                                    parsed_arguments = self._parse_tool_payload(
+                                        raw_arguments
+                                    )
+                                    pretty_calls.append({
+                                        "id": call_id,
+                                        "name": call_name,
+                                        "arguments": parsed_arguments,
+                                    })
+                                    if call_id:
+                                        already_recorded = (
+                                            call_id in self._tool_calls_by_id
+                                        )
+                                        self._record_tool_call(
+                                            call_id, call_name, parsed_arguments
+                                        )
+                                        if not already_recorded:
+                                            self._write_tool_debug(
+                                                call_id,
+                                                "call",
+                                                {
+                                                    "name": call_name,
+                                                    "arguments": parsed_arguments,
+                                                },
+                                            )
                                 chat.append_block(
                                     f"[assistant tool_calls]\n{pretty_calls}"
                                 )
