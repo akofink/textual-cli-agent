@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
-from textual.widgets import Tree, Static
+from textual.widgets import Static, Tree, TextArea
 
 
 @dataclass
@@ -50,56 +50,39 @@ class ToolTurn:
     start_time: float = field(default_factory=time.time)
 
 
-class ToolCallDetails(Static):
-    """Widget to display detailed information about a tool call."""
+def _format_tool_call_details(tool_call: ToolCall, session_start: float) -> str:
+    """Format tool call details as plain text."""
+    relative_time = tool_call.start_time - session_start
+    duration_text = ""
+    if tool_call.duration:
+        duration_text = f"{tool_call.duration:.2f}s"
 
-    def __init__(self, tool_call: ToolCall, session_start: float) -> None:
-        self.tool_call = tool_call
-        self.session_start = session_start
-        super().__init__()
-        self.update_content()
+    try:
+        args_json = json.dumps(tool_call.args, indent=2) if tool_call.args else "{}"
+    except Exception:
+        args_json = str(tool_call.args)
 
-    def update_content(self) -> None:
-        """Update the content display."""
-        call = self.tool_call
-        relative_time = call.start_time - self.session_start
-
-        # Format args and result as pretty JSON
+    if tool_call.error:
+        result_text = f"Error: {tool_call.error}"
+    elif tool_call.result is not None:
         try:
-            args_json = json.dumps(call.args, indent=2) if call.args else "{}"
+            if isinstance(tool_call.result, (str, int, float, bool)):
+                result_text = str(tool_call.result)
+            else:
+                result_text = json.dumps(tool_call.result, indent=2)
         except Exception:
-            args_json = str(call.args)
+            result_text = str(tool_call.result)
+    else:
+        result_text = "Running..."
 
-        result_text = ""
-        if call.error:
-            result_text = f"[red]Error: {call.error}[/red]"
-        elif call.result is not None:
-            try:
-                if isinstance(call.result, (str, int, float, bool)):
-                    result_text = f"[green]{call.result}[/green]"
-                else:
-                    result_json = json.dumps(call.result, indent=2)
-                    result_text = f"[green]{result_json}[/green]"
-            except Exception:
-                result_text = f"[green]{str(call.result)}[/green]"
-        else:
-            result_text = "[yellow]Running...[/yellow]"
-
-        duration_text = ""
-        if call.duration:
-            duration_text = f"Duration: {call.duration:.2f}s"
-
-        content = f"""[bold]{call.name}[/bold] {call.status}
-ID: {call.id}
-Time: +{relative_time:.1f}s {duration_text}
-
-[bold]Arguments:[/bold]
-{args_json}
-
-[bold]Result:[/bold]
-{result_text}"""
-
-        self.update(content)
+    return (
+        f"{tool_call.name} {tool_call.status}\n"
+        f"ID: {tool_call.id}\n"
+        f"Time: +{relative_time:.1f}s"
+        f"{f' Duration: {duration_text}' if duration_text else ''}\n\n"
+        f"Arguments:\n{args_json}\n\n"
+        f"Result:\n{result_text}"
+    )
 
 
 class ToolPanel(Container):
@@ -111,16 +94,21 @@ class ToolPanel(Container):
         self.turns: List[ToolTurn] = []
         self.current_turn: Optional[ToolTurn] = None
         self.visible = False
+        self._selected_call_id: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         """Create the tool panel layout."""
         yield Vertical(
             Static("🔧 Tool Calls", id="tool_panel_header", classes="panel-header"),
             Tree("Tool Activity", id="tool_tree"),
-            Static(
-                "Click a tool call to see details",
+            TextArea(
+                "Select a tool call to see details",
                 id="tool_details",
                 classes="tool-details",
+                read_only=True,
+                show_line_numbers=False,
+                soft_wrap=True,
+                tab_behavior="focus",
             ),
             classes="tool-panel-content",
         )
@@ -165,6 +153,8 @@ class ToolPanel(Container):
             else:
                 tool_call.result = result
             self._update_tree()
+            if self._selected_call_id == call_id:
+                self._show_call_details(tool_call)
 
     def mark_parallel(self, call_ids: List[str]) -> None:
         """Mark tool calls as parallel execution."""
@@ -192,6 +182,8 @@ class ToolPanel(Container):
 
             tree.label = f"Tool Activity ({len(self.turns)} turns)"
 
+            selected_node = None
+
             for turn in self.turns:
                 if not turn.calls:
                     continue
@@ -210,31 +202,60 @@ class ToolPanel(Container):
                     if call.duration:
                         call_label += f" ({call.duration:.2f}s)"
 
-                    turn_node.add(call_label, data={"type": "call", "call": call})
+                    node = turn_node.add(
+                        call_label, data={"type": "call", "call": call}
+                    )
+                    if call.id == self._selected_call_id:
+                        selected_node = node
+
+            if self._selected_call_id and not selected_node:
+                # Selected call no longer present; reset selection and details
+                self._selected_call_id = None
+                try:
+                    details_widget = self.query_one("#tool_details", TextArea)
+                    details_widget.load_text("Select a tool call to see details")
+                except Exception:
+                    pass
+            elif selected_node is not None:
+                try:
+                    tree.select_node(selected_node)
+                except Exception:
+                    pass
 
         except Exception:
             # Graceful fallback if tree update fails
             pass
 
+    def _show_call_details(
+        self, tool_call: ToolCall, details_widget: Optional[TextArea] = None
+    ) -> None:
+        """Render detailed information for a tool call."""
+        try:
+            widget = details_widget or self.query_one("#tool_details", TextArea)
+            widget.load_text(_format_tool_call_details(tool_call, self.session_start))
+        except Exception:
+            pass
+
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         """Handle tree node selection to show details."""
         try:
-            details_widget = self.query_one("#tool_details", Static)
+            details_widget = self.query_one("#tool_details", TextArea)
 
-            if event.node.data and event.node.data.get("type") == "call":
-                tool_call = event.node.data["call"]
-
-                # Create detailed view
-                detail_widget = ToolCallDetails(tool_call, self.session_start)
-                details_widget.update(detail_widget.renderable)
-            elif event.node.data and event.node.data.get("type") == "turn":
-                turn = event.node.data["turn"]
+            node_data = event.node.data or {}
+            if node_data.get("type") == "call":
+                tool_call = node_data["call"]
+                self._selected_call_id = tool_call.id
+                self._show_call_details(tool_call, details_widget)
+            elif node_data.get("type") == "turn":
+                self._selected_call_id = None
+                turn = node_data["turn"]
                 summary = f"Turn {turn.turn_id} - {len(turn.calls)} tool calls"
                 if turn.is_parallel:
                     summary += " (parallel execution)"
-                details_widget.update(summary)
+                details_widget.load_text(summary)
             else:
-                details_widget.update("Select a tool call to see details")
+                self._selected_call_id = None
+                details_widget.load_text("Select a tool call to see details")
 
         except Exception:
             # Graceful fallback

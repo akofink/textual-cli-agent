@@ -7,7 +7,16 @@ import asyncio
 from datetime import datetime
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    LoadingIndicator,
+    RichLog,
+    Static,
+    TextArea,
+)
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
 from textual import events
@@ -115,6 +124,19 @@ class ChatCommands(CommandProvider):
                     yield Hit(
                         score, matcher.highlight(title), partial(action), help=help_text
                     )
+
+
+class ChatHeader(Header):
+    """Header with an inline quit button."""
+
+    def compose(self) -> ComposeResult:  # type: ignore[override]
+        yield from super().compose()
+        yield Button(
+            "✕",
+            id="header_quit_button",
+            tooltip="Quit (Ctrl+Q)",
+            classes="quit-button header-button",
+        )
 
 
 class ChatView(RichLog):  # type: ignore[misc]
@@ -256,14 +278,56 @@ class ChatApp(App):  # type: ignore[misc]
         width: 100%;
     }
 
-    .status {
+    #status_container {
         dock: bottom;
         height: 1;
         background: $accent;
         color: $text;
-        text-align: center;
         padding: 0 1;
         width: 100%;
+        layout: horizontal;
+        align: center middle;
+    }
+
+    #status_text {
+        text-align: center;
+        width: 1fr;
+        color: $text;
+        margin-right: 1;
+    }
+
+    #llm_indicator {
+        color: $text;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    .quit-button {
+        background: transparent;
+        color: $text;
+        border: none;
+        padding: 0 1;
+        min-width: 3;
+        content-align: center middle;
+    }
+
+    .quit-button:hover {
+        background: $accent;
+        color: $text;
+    }
+
+    Header .header-button {
+        dock: right;
+        height: 100%;
+        margin: 0 1 0 0;
+    }
+
+    #status_container .status-button {
+        dock: right;
+        margin-left: 1;
+        height: 1;
     }
 
     #tool_panel {
@@ -304,6 +368,10 @@ class ChatApp(App):  # type: ignore[misc]
         background: $panel;
         padding: 1;
         overflow-y: auto;
+        scrollbar-background: $panel;
+        scrollbar-color: $accent;
+        scrollbar-corner-color: $panel;
+        scrollbar-size: 1 1;
     }
 
     /* Todo panel styles */
@@ -352,8 +420,8 @@ class ChatApp(App):  # type: ignore[misc]
 
     BINDINGS = [
         # Keep essential shortcuts that users expect
-        Binding("ctrl+c", "quit", "Quit", show=True),
-        Binding("ctrl+q", "quit", "Quit", show=False),
+        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+c", "copy", "Copy", show=True),
         # Removed Ctrl+D binding to avoid accidental quits and repurpose for theme toggle via palette
         # Binding("ctrl+d", "toggle_dark", "Theme", show=True),
         # Keep most common actions as shortcuts
@@ -532,9 +600,14 @@ class ChatApp(App):  # type: ignore[misc]
             self._apply_tool_result(tool_id, content)
 
     def on_key(self, event: events.Key) -> None:
-        # Ensure Ctrl+C / Ctrl+D always quit, even if widgets handle them differently
-        if event.key in ("ctrl+c", "ctrl+q"):
+        # Ensure Ctrl+Q always quits, even if widgets handle it differently
+        if event.key == "ctrl+q":
             event.prevent_default()
+            event.stop()
+            self.exit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id in {"quit_button", "header_quit_button"}:
             event.stop()
             self.exit()
 
@@ -666,13 +739,88 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception as e:
             logger.error(f"Failed to persist theme in watch_dark: {e}")
 
-    def action_copy_chat(self) -> None:
-        """Enhanced copy functionality inspired by Toad's text interaction."""
+    def _copy_text_to_clipboard(self, text: str, success_message: str) -> bool:
+        """Attempt to copy text to clipboard and surface feedback."""
+        if not text.strip():
+            self.bell()
+            return False
+
+        try:
+            self.copy_to_clipboard(text)
+            try:
+                chat = self.query_one("#chat", ChatView)
+                if success_message:
+                    chat.append_block(success_message)
+            except Exception:
+                pass
+            return True
+        except Exception as primary_error:
+            logger.debug(f"Primary clipboard copy failed: {primary_error}")
+
         try:
             import pyperclip  # type: ignore
-        except Exception:
-            pyperclip = None  # type: ignore
 
+            pyperclip.copy(text)  # type: ignore[attr-defined]
+            try:
+                chat = self.query_one("#chat", ChatView)
+                if success_message:
+                    chat.append_block(success_message)
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            logger.debug(f"pyperclip fallback failed: {e}")
+
+        return False
+
+    def _copy_textarea(
+        self, textarea: TextArea, include_full_text: bool = False
+    ) -> bool:
+        """Copy selection (or full text) from a TextArea if available."""
+        selected = getattr(textarea, "selected_text", "")
+        success_message = (
+            "[ok] Tool details copied to clipboard"
+            if textarea.id == "tool_details"
+            else "[ok] Text copied to clipboard"
+        )
+
+        if selected:
+            return self._copy_text_to_clipboard(selected, success_message)
+
+        if include_full_text and textarea.text.strip():
+            return self._copy_text_to_clipboard(textarea.text, success_message)
+
+        return False
+
+    def action_copy(self) -> None:
+        """Context-aware copy shortcut."""
+        try:
+            focused = self.screen.focused  # type: ignore[attr-defined]
+        except Exception:
+            focused = None
+
+        if isinstance(focused, TextArea):
+            if self._copy_textarea(focused, include_full_text=True):
+                return
+            logger.debug("TextArea copy did not succeed; falling back")
+        else:
+            panel = self._get_tool_panel()
+            if panel:
+                try:
+                    details = panel.query_one("#tool_details", TextArea)
+                    if self._copy_textarea(
+                        details, include_full_text=details.has_focus
+                    ):
+                        return
+                except Exception as e:
+                    logger.debug(
+                        f"Tool details copy check failed, falling back to chat copy: {e}"
+                    )
+
+        self.action_copy_chat()
+
+    def action_copy_chat(self) -> None:
+        """Enhanced copy functionality inspired by Toad's text interaction."""
         try:
             chat = self.query_one("#chat", ChatView)
             text = chat.get_text()
@@ -687,28 +835,21 @@ class ChatApp(App):  # type: ignore[misc]
             self.bell()  # Audio feedback for error
             return
 
-        success = False
-        if pyperclip:
-            try:
-                pyperclip.copy(text)  # type: ignore[attr-defined]
-                success = True
-                chat.append_block("[ok] Chat history copied to clipboard")
-            except Exception:
-                pass
+        if self._copy_text_to_clipboard(text, "[ok] Chat history copied to clipboard"):
+            return
 
         # Enhanced fallback: write to a file with better naming
-        if not success:
-            try:
-                from datetime import datetime
+        try:
+            from datetime import datetime
 
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"chat_export_{timestamp}.txt"
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(text)
-                chat.append_block(f"[ok] Chat history exported to ./{filename}")
-            except Exception as e:
-                logger.error(f"Error writing chat export file: {e}")
-                self.bell()  # Audio feedback for error
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"chat_export_{timestamp}.txt"
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(text)
+            chat.append_block(f"[ok] Chat history exported to ./{filename}")
+        except Exception as e:
+            logger.error(f"Error writing chat export file: {e}")
+            self.bell()  # Audio feedback for error
 
     def action_help_panel(self) -> None:
         try:
@@ -797,10 +938,32 @@ class ChatApp(App):  # type: ignore[misc]
         except Exception:
             pass
 
+    def _set_loading_indicator(self, busy: bool) -> None:
+        """Show or hide the loading indicator."""
+        try:
+            indicator = self.query_one("#llm_indicator", LoadingIndicator)
+        except Exception:
+            return
+        if busy:
+            indicator.remove_class("hidden")
+            try:
+                indicator.loading = True
+                indicator.display = True
+            except Exception:
+                pass
+        else:
+            indicator.add_class("hidden")
+            try:
+                indicator.loading = False
+                indicator.display = False
+            except Exception:
+                pass
+
     def _update_status(self, working: bool = False) -> None:
         """Update the footer status bar with current state."""
+        busy = working or self._pending_count > 0
         try:
-            status_bar = self.query_one("#status_bar", Static)
+            status_bar = self.query_one("#status_text", Static)
             if working:
                 status_text = f"Working… (pending: {self._pending_count})"
             else:
@@ -812,6 +975,7 @@ class ChatApp(App):  # type: ignore[misc]
             status_bar.update(status_text)
         except Exception:
             pass  # Status bar may not be mounted yet
+        self._set_loading_indicator(busy)
 
     def _render_todos(self, chat: "ChatView") -> None:
         try:
@@ -890,7 +1054,7 @@ class ChatApp(App):  # type: ignore[misc]
         todo_panel = TodoPanel()
         self._tool_panel_widget = tool_panel
         self._todo_panel_widget = todo_panel
-        yield Header(show_clock=True, id="hdr")
+        yield ChatHeader(show_clock=True, id="hdr")
         yield Horizontal(
             Vertical(
                 ChatView(id="chat"),
@@ -905,7 +1069,17 @@ class ChatApp(App):  # type: ignore[misc]
             todo_panel,
             id="content_area",
         )
-        yield Static("Idle", id="status_bar", classes="status")
+        yield Horizontal(
+            LoadingIndicator(id="llm_indicator", classes="hidden"),
+            Static("Idle", id="status_text"),
+            Button(
+                "✕",
+                id="quit_button",
+                tooltip="Quit (Ctrl+Q)",
+                classes="quit-button status-button",
+            ),
+            id="status_container",
+        )
         yield Footer(id="footer")
 
     async def _worker(self) -> None:
