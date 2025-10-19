@@ -124,8 +124,14 @@ def chat(
             async for chunk in engine.run_stream(messages):
                 ctype = chunk.get("type")
                 if ctype == "text":
-                    sys.stdout.write(chunk.get("delta", ""))
-                    sys.stdout.flush()
+                    console.print(
+                        chunk.get("delta", ""),
+                        end="",
+                        soft_wrap=True,
+                        highlight=False,
+                        markup=False,
+                    )
+                    console.file.flush()
                 elif ctype == "tool_call":
                     had_tool_calls = True
                     console.print(
@@ -142,8 +148,7 @@ def chat(
                 elif ctype == "round_complete":
                     had_tool_calls = bool(chunk.get("had_tool_calls", had_tool_calls))
                     if not had_tool_calls:
-                        sys.stdout.write("\n")
-                        sys.stdout.flush()
+                        console.print()
                     break
             if not had_tool_calls:
                 break
