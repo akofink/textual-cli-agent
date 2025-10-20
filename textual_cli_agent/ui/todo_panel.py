@@ -79,15 +79,18 @@ class TodoPanel(Container):
         try:
             tree = self.query_one("#todo_tree", Tree)
             tree.clear()
+            root = tree.root
+            if root is None:
+                return
 
             if not self.todos:
-                tree.label = "No tasks yet"
+                root.label = "No tasks yet"
                 return
 
             completed_count = sum(
                 1 for todo in self.todos if todo.status == "completed"
             )
-            tree.label = f"Tasks ({completed_count}/{len(self.todos)} complete)"
+            root.label = f"Tasks ({completed_count}/{len(self.todos)} complete)"
 
             # Group by status
             pending = [t for t in self.todos if t.status == "pending"]
@@ -95,21 +98,21 @@ class TodoPanel(Container):
             completed = [t for t in self.todos if t.status == "completed"]
 
             if in_progress:
-                progress_node = tree.root.add("🔄 In Progress", data={"type": "group"})
+                progress_node = root.add("🔄 In Progress", data={"type": "group"})
                 for todo in in_progress:
                     progress_node.add(
                         f"⚡ {todo.content}", data={"type": "todo", "todo": todo}
                     )
 
             if pending:
-                pending_node = tree.root.add("📋 Pending", data={"type": "group"})
+                pending_node = root.add("📋 Pending", data={"type": "group"})
                 for todo in pending:
                     pending_node.add(
                         f"⏸️ {todo.content}", data={"type": "todo", "todo": todo}
                     )
 
             if completed:
-                completed_node = tree.root.add("✅ Completed", data={"type": "group"})
+                completed_node = root.add("✅ Completed", data={"type": "group"})
                 for todo in completed:
                     completed_node.add(
                         f"✓ {todo.content}", data={"type": "todo", "todo": todo}

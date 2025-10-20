@@ -760,11 +760,17 @@ class ChatApp(App):  # type: ignore[misc]
         """Set a specific theme by name and persist to config.
         This is called by Textual's command palette when choosing a theme.
         """
-        try:
-            # Prefer Textual's implementation if available
-            super().action_set_theme(theme)  # type: ignore[attr-defined]
-        except Exception:
-            # Fallback: set directly
+        handled_by_parent = False
+        parent = super(ChatApp, self)
+        parent_action = getattr(parent, "action_set_theme", None)
+        if callable(parent_action):
+            try:
+                parent_action(theme)  # type: ignore[misc]
+                handled_by_parent = True
+            except Exception:
+                handled_by_parent = False
+
+        if not handled_by_parent:
             try:
                 self.theme = theme
             except Exception as e:

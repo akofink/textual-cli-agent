@@ -29,7 +29,9 @@ async def test_tool_panel_shows_details_and_errors() -> None:
         panel.add_tool_call("call_1", "test_tool", {"foo": "bar"})
 
         tree = panel.query_one("#tool_tree", Tree)
-        call_node = tree.root.children[0].children[0]
+        root = tree.root
+        assert root is not None
+        call_node = root.children[0].children[0]
         panel.on_tree_node_selected(Tree.NodeSelected(call_node))
 
         details = panel.query_one("#tool_details", TextArea)
@@ -52,7 +54,9 @@ async def test_tool_panel_selection_persists_after_update() -> None:
         panel.add_tool_call("call_1", "test_tool", {"foo": "bar"})
 
         tree = panel.query_one("#tool_tree", Tree)
-        turn_node = tree.root.children[0]
+        root = tree.root
+        assert root is not None
+        turn_node = root.children[0]
         call_node = turn_node.children[0]
         tree.select_node(call_node)
         panel.on_tree_node_selected(Tree.NodeSelected(call_node))
@@ -87,6 +91,7 @@ async def test_tool_panel_updates_existing_call_args() -> None:
         panel.add_tool_call("call_1", "demo", {"value": 1})
         panel.add_tool_call("call_1", "demo", {"value": 2})
 
+        assert panel.current_turn is not None
         assert len(panel.current_turn.calls) == 1
         call = panel.current_turn.calls[0]
         assert call.args == {"value": 2}

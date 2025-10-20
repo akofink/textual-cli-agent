@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import types
-from typing import Any, AsyncIterator, Optional, List
+from typing import Any, AsyncIterator, Optional, List, cast
 import pytest
+from openai import AsyncOpenAI
 
 from textual_cli_agent.providers.openai_provider import OpenAIProvider
 from textual_cli_agent.providers.base import ProviderConfig
@@ -87,7 +88,7 @@ async def test_chunked_tool_call_arguments_are_buffered(monkeypatch) -> None:
                 completions=types.SimpleNamespace(create=fake_create)
             )
 
-    prov.client = Dummy()
+    prov.client = cast(AsyncOpenAI, Dummy())
 
     # Collect tool_call events
     events: list[dict[str, Any]] = []

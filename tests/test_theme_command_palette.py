@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
+from typing import Any
 
 import pytest  # type: ignore[import-not-found]
 
@@ -12,12 +13,12 @@ from textual_cli_agent.providers.base import Provider, ProviderConfig, ToolSpec 
 
 
 class FakeProvider(Provider):  # type: ignore[misc]
-    async def list_tools_format(self, tools: list[ToolSpec]) -> any:
+    async def list_tools_format(self, tools: list[ToolSpec]) -> Any:
         return []
 
     async def completions_stream(
         self, messages: list[dict], tools: list[ToolSpec] | None = None
-    ) -> any:
+    ) -> Any:
         if False:
             yield {}
         return

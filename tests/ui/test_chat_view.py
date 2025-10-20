@@ -26,7 +26,9 @@ async def test_chat_view_mouse_selection() -> None:
 
         selection = chat.text_selection
         assert selection is not None
-        text, _ = chat.get_selection(selection)
+        selection_result = chat.get_selection(selection)
+        assert selection_result is not None
+        text, _ = selection_result
         assert text == "ello"
 
 

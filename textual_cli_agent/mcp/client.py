@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Awaitable, Dict, List, cast
 from ..providers.base import ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,10 @@ class McpManager:
                 logger.info(f"Starting MCP stdio server: {cmd}")
                 # Let the MCP SDK manage the process lifecycle; no need to pre-spawn ourselves
                 params = StdioServerParameters(command=cmd)
-                client = await stdio_client(params)
+                if stdio_client is None:
+                    raise RuntimeError("MCP stdio client is not available")
+                client_raw = stdio_client(params)
+                client = await cast(Awaitable[Any], client_raw)
                 self.clients.append(client)
                 logger.info(f"Successfully connected to stdio server: {cmd}")
             except Exception as e:
@@ -72,7 +75,8 @@ class McpManager:
             for url in http_urls:
                 try:
                     logger.info(f"Connecting to MCP HTTP server: {url}")
-                    client = await http_client(url)
+                    client_raw = http_client(url)
+                    client = await cast(Awaitable[Any], client_raw)
                     self.clients.append(client)
                     logger.info(f"Successfully connected to HTTP server: {url}")
                 except Exception as e:

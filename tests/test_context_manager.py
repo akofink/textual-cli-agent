@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from textual_cli_agent.context_manager import ContextManager
 
 
@@ -9,7 +11,7 @@ def build_messages(count: int, role: str = "user") -> list[dict[str, str]]:
 
 def test_estimate_tokens_counts_text_and_tool_calls() -> None:
     manager = ContextManager()
-    messages = [
+    messages: list[dict[str, Any]] = [
         {"role": "user", "content": "abcd" * 4},
         {
             "role": "assistant",

@@ -183,12 +183,15 @@ class ToolPanel(Container):
         try:
             tree = self.query_one("#tool_tree", Tree)
             tree.clear()
-
-            if not self.turns:
-                tree.label = "No tool calls yet"
+            root = tree.root
+            if root is None:
                 return
 
-            tree.label = f"Tool Activity ({len(self.turns)} turns)"
+            if not self.turns:
+                root.label = "No tool calls yet"
+                return
+
+            root.label = f"Tool Activity ({len(self.turns)} turns)"
 
             selected_node = None
 
@@ -200,9 +203,7 @@ class ToolPanel(Container):
                 turn_label = f"Turn {turn.turn_id}"
                 if turn.is_parallel:
                     turn_label += " (Parallel)"
-                turn_node = tree.root.add(
-                    turn_label, data={"type": "turn", "turn": turn}
-                )
+                turn_node = root.add(turn_label, data={"type": "turn", "turn": turn})
 
                 # Add tool calls
                 for call in turn.calls:
