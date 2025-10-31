@@ -95,6 +95,7 @@ class ToolPanel(Container):
         self.current_turn: Optional[ToolTurn] = None
         self.visible = False
         self._selected_call_id: Optional[str] = None
+        self._call_id_to_turn: Dict[str, ToolTurn] = {}
 
     def compose(self) -> ComposeResult:
         """Create the tool panel layout."""
@@ -136,7 +137,12 @@ class ToolPanel(Container):
         if not self.current_turn:
             self.start_turn(len(self.turns))
 
-        existing = self._find_tool_call(call_id)
+        current_turn = self.current_turn
+        existing = (
+            self._find_tool_call(call_id, turns=[current_turn])
+            if current_turn
+            else None
+        )
         if existing:
             existing.args = args
             if self._selected_call_id == call_id:
@@ -144,9 +150,20 @@ class ToolPanel(Container):
             self._update_tree()
             return
 
+        previous_turn = self._call_id_to_turn.get(call_id)
+        if previous_turn and previous_turn is not current_turn:
+            existing = self._find_tool_call(call_id, turns=[previous_turn])
+            if existing:
+                existing.args = args
+                if self._selected_call_id == call_id:
+                    self._show_call_details(existing)
+                self._update_tree()
+                return
+
         if self.current_turn:  # Type guard for mypy
             tool_call = ToolCall(id=call_id, name=name, args=args)
             self.current_turn.calls.append(tool_call)
+            self._call_id_to_turn[call_id] = self.current_turn
             self._update_tree()
 
     def update_tool_result(
@@ -170,10 +187,13 @@ class ToolPanel(Container):
             self.current_turn.is_parallel = True
             self._update_tree()
 
-    def _find_tool_call(self, call_id: str) -> Optional[ToolCall]:
+    def _find_tool_call(
+        self, call_id: str, *, turns: Optional[List[ToolTurn]] = None
+    ) -> Optional[ToolCall]:
         """Find a tool call by ID."""
-        for turn in self.turns:
-            for call in turn.calls:
+        search_turns = list(turns or self.turns)
+        for turn in reversed(search_turns):
+            for call in reversed(turn.calls):
                 if call.id == call_id:
                     return call
         return None
@@ -211,7 +231,7 @@ class ToolPanel(Container):
                     if call.duration:
                         call_label += f" ({call.duration:.2f}s)"
 
-                    node = turn_node.add(
+                    node = turn_node.add_leaf(
                         call_label, data={"type": "call", "call": call}
                     )
                     if call.id == self._selected_call_id:
