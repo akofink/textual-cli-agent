@@ -146,8 +146,10 @@ The agent will advertise your tools to the selected provider and automatically e
 - Tool call results and assistant messages are streamed into the chat view
 - **Robust error handling**: API errors, stream processing failures, and UI errors are handled gracefully
 - **Keyboard shortcuts**:
-  - Ctrl+C, Ctrl+Q, Ctrl+D to exit
-  - Ctrl+Y to copy chat history
+  - Ctrl+Q to exit
+  - Ctrl+C for context-aware copy (chat, input, or tool details)
+  - Ctrl+Shift+C to copy the current tool call details
+  - Ctrl+Y to copy full chat history
 - **Timeout protection**: Tool execution is protected with 60-second timeouts
 - All errors are logged and displayed in a user-friendly format
 

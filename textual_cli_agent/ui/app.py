@@ -478,6 +478,7 @@ class ChatApp(App):  # type: ignore[misc]
         # Keep essential shortcuts that users expect
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+c", "copy", "Copy", show=True),
+        Binding("ctrl+shift+c", "copy_tool_details", "Copy Tool", show=True),
         # Removed Ctrl+D binding to avoid accidental quits and repurpose for theme toggle via palette
         # Binding("ctrl+d", "toggle_dark", "Theme", show=True),
         # Keep most common actions as shortcuts
@@ -922,6 +923,24 @@ class ChatApp(App):  # type: ignore[misc]
             logger.error(f"Error writing chat export file: {e}")
             self.bell()  # Audio feedback for error
 
+    def action_copy_tool_details(self) -> None:
+        """Copy the current tool details pane to the clipboard."""
+        panel = self._get_tool_panel()
+        if not panel:
+            self.bell()
+            return
+
+        try:
+            details = panel.query_one("#tool_details", TextArea)
+        except Exception:
+            self.bell()
+            return
+
+        if self._copy_textarea(details, include_full_text=True):
+            return
+
+        self.bell()
+
     def action_help_panel(self) -> None:
         try:
             chat = self.query_one("#chat", ChatView)
@@ -932,6 +951,7 @@ class ChatApp(App):  # type: ignore[misc]
                 "  Ctrl+D  Toggle theme (via command palette)\n"
                 "  F2      Toggle Tools panel\n"
                 "  Ctrl+Y  Copy chat\n"
+                "  Ctrl+Shift+C Copy tool details\n"
                 "  Ctrl+L  Clear chat\n"
                 "  Home/End Scroll\n"
                 "Commands: type /help for full list"
