@@ -3,7 +3,7 @@ name = "textual-cli-agent"
 version = "0.1.0"
 description = "A Textual-based CLI LLM agent with MCP support and pluggable Python tools"
 authors = [
-  { name = "Rovo Dev" }
+  { name = "Andrew Kofink" }
 ]
 readme = "README.md"
 requires-python = ">=3.11"
