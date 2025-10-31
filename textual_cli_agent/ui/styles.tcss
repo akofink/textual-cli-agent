@@ -1,0 +1,194 @@
+Screen {
+    layout: vertical;
+    background: $surface;
+}
+
+Header Title {
+    content-align: left middle;
+}
+
+#content_area {
+    layout: horizontal;
+    height: 1fr;
+    width: 100%;
+}
+
+#main_area {
+    layout: vertical;
+    height: 100%;
+    width: 1fr;
+    min-width: 40%;
+}
+
+#chat {
+    height: 1fr;
+    width: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: solid $primary;
+    scrollbar-background: $panel;
+    scrollbar-color: $accent;
+    scrollbar-corner-color: $panel;
+    scrollbar-size: 1 1;
+    text-wrap: wrap;
+}
+
+#input {
+    dock: bottom;
+    width: 100%;
+    margin: 1 0;
+    border: solid $accent;
+    background: $surface;
+}
+
+RichLog {
+    background: $surface;
+    color: $text;
+    border: none;
+    padding: 1;
+}
+
+Input {
+    background: $surface;
+    color: $text;
+    width: 100%;
+}
+
+#status_container {
+    dock: bottom;
+    height: 1;
+    background: $accent;
+    color: $text;
+    padding: 0 1;
+    width: 100%;
+    layout: horizontal;
+    align: center middle;
+}
+
+#status_text {
+    text-align: center;
+    width: 1fr;
+    color: $text;
+    margin-right: 1;
+}
+
+#llm_indicator {
+    color: $text;
+}
+
+.hidden {
+    display: none;
+}
+
+.quit-button {
+    background: transparent;
+    color: $text;
+    border: none;
+    padding: 0 1;
+    min-width: 3;
+    content-align: center middle;
+}
+
+.quit-button:hover {
+    background: $accent;
+    color: $text;
+}
+
+Header .header-button {
+    dock: right;
+    height: 100%;
+    margin: 0 1 0 0;
+}
+
+#status_container .status-button {
+    dock: right;
+    margin-left: 1;
+    height: 1;
+}
+
+#tool_panel {
+    display: none;
+    width: 30%;
+    height: 100%;
+    border: solid $primary;
+    background: $surface;
+    min-width: 20%;
+    max-width: 45%;
+}
+
+#tool_panel.visible {
+    display: block;
+    width: 30%;
+}
+
+.panel-header {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    content-align: center middle;
+    width: 100%;
+}
+
+.tool-panel-content {
+    height: 100%;
+    width: 100%;
+}
+
+.tool-details {
+    dock: bottom;
+    height: 50%;
+    width: 100%;
+    border: solid $accent;
+    background: $panel;
+    padding: 1;
+    overflow-y: auto;
+    scrollbar-background: $panel;
+    scrollbar-color: $accent;
+    scrollbar-corner-color: $panel;
+    scrollbar-size: 1 1;
+}
+
+/* Todo panel styles */
+#todo_panel {
+    display: none;
+    width: 25%;
+    min-width: 20%;
+    max-width: 40%;
+    height: 100%;
+    border: solid $primary;
+    background: $surface;
+}
+
+#todo_panel.visible {
+    display: block;
+    width: 25%;
+}
+
+.todo-panel-content {
+    height: 100%;
+    width: 100%;
+}
+
+.todo-details {
+    dock: bottom;
+    height: 50%;
+    width: 100%;
+    border: solid $accent;
+    background: $panel;
+    padding: 1;
+    overflow-y: auto;
+}
+
+#tool_tree {
+    height: 1fr;
+    width: 100%;
+    background: $surface;
+}
+
+#todo_tree {
+    height: 1fr;
+    width: 100%;
+    background: $surface;
+}
