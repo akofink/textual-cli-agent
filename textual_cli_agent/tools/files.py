@@ -1,16 +1,46 @@
 from __future__ import annotations
 
 import glob
-import os
 import re
-from typing import List
+from pathlib import Path
+from typing import Iterator, List, Optional, TextIO, cast
 
+from ..workspace import workspace_root
 from .registry import tool
+
+
+def _candidate_paths(path: str) -> Iterator[Path]:
+    raw = Path(path).expanduser()
+    yield raw
+    if raw.is_absolute():
+        relative = Path(*raw.parts[1:]) if raw.parts[1:] else Path(".")
+        fallback = workspace_root() / relative
+        if fallback != raw:
+            yield fallback
+
+
+def _open_with_candidates(
+    path: str,
+    mode: str,
+    encoding: str = "utf-8",
+) -> tuple[Path, TextIO]:
+    last_error: Optional[OSError] = None
+    for candidate in _candidate_paths(path):
+        try:
+            handle = cast(TextIO, open(candidate, mode, encoding=encoding))
+        except OSError as exc:
+            last_error = exc
+            continue
+        return candidate, handle
+    if last_error is not None:
+        raise last_error
+    raise FileNotFoundError(path)
 
 
 @tool(description="Read a text file.")
 def file_read(path: str, encoding: str = "utf-8") -> str:
-    with open(path, "r", encoding=encoding) as handle:
+    _, handle = _open_with_candidates(path, "r", encoding)
+    with handle:
         return handle.read()
 
 
@@ -19,19 +49,31 @@ def file_write(
     path: str, content: str, encoding: str = "utf-8", append: bool = False
 ) -> str:
     mode = "a" if append else "w"
-    with open(path, mode, encoding=encoding) as handle:
+    resolved, handle = _open_with_candidates(path, mode, encoding)
+    with handle:
         handle.write(content)
-    return path
+    return str(resolved)
 
 
 @tool(description="Check if a path exists.")
 def path_exists(path: str) -> bool:
-    return os.path.exists(path)
+    for candidate in _candidate_paths(path):
+        if candidate.exists():
+            return True
+    return False
 
 
 @tool(description="Glob for files matching a pattern.")
 def glob_files(pattern: str) -> List[str]:
-    return sorted(glob.glob(pattern, recursive=True))
+    results = sorted(glob.glob(pattern, recursive=True))
+    if results:
+        return results
+    candidate = Path(pattern)
+    if candidate.is_absolute():
+        relative = Path(*candidate.parts[1:]) if candidate.parts[1:] else Path(".")
+        fallback_pattern = str(workspace_root() / relative)
+        return sorted(glob.glob(fallback_pattern, recursive=True))
+    return results
 
 
 @tool(
@@ -47,11 +89,16 @@ def find_replace(
     count = 0
     compiled = re.compile(pattern) if regex else None
     for target in paths:
-        try:
-            with open(target, "r", encoding=encoding) as handle:
-                data = handle.read()
-        except FileNotFoundError:
+        source_path: Optional[Path] = None
+        for candidate in _candidate_paths(target):
+            if candidate.exists():
+                source_path = candidate
+                break
+        if source_path is None:
             continue
+
+        with open(source_path, "r", encoding=encoding) as handle:
+            data = handle.read()
 
         if regex:
             assert compiled is not None
@@ -63,7 +110,7 @@ def find_replace(
         if not replacements:
             continue
 
-        with open(target, "w", encoding=encoding) as handle:
+        with open(source_path, "w", encoding=encoding) as handle:
             handle.write(new_content)
         count += replacements
     return count

@@ -11,6 +11,7 @@ from rich.console import Console
 from .providers.base import ProviderConfig, ProviderFactory
 from .tools import load_tools_from_modules
 from .mcp.client import McpManager
+from .workspace import WORKSPACE_ROOT_ENV
 
 app = typer.Typer(add_completion=False, help="Textual CLI Agent")
 console = Console()
@@ -76,6 +77,8 @@ def chat(
     # Load tools first so we can build a sensible default system prompt
     py_tools = load_tools_from_modules(tool_module)
 
+    workspace_dir = os.environ.setdefault(WORKSPACE_ROOT_ENV, os.getcwd())
+
     # Default system prompt if none provided
     if system is None:
         try:
@@ -91,6 +94,8 @@ def chat(
             "You have access to the local filesystem and other capabilities via callable tools. "
             f"Available tools include: {tool_names}. "
             "Use them when needed (e.g., read README.md or pyproject.toml to understand the repo). "
+            f"The current workspace root is: {workspace_dir}. "
+            "Interpret relative paths from that directory, and when tools fail on absolute paths, retry using workspace-relative variants. "
             "When asked about the project, explore files and summarize. Be precise, cite filenames, and avoid hallucinations. "
             "IMPORTANT: You have a limited number of tool-calling rounds per conversation (default 15). "
             "Be strategic with tool usage - batch related operations when possible and prioritize the most important tasks. "

@@ -6,6 +6,7 @@ from textual_cli_agent.tools import (
     glob_files,
 )
 from pathlib import Path
+from pytest import MonkeyPatch
 
 
 def test_file_write_read_and_exists(tmp_path: Path) -> None:
@@ -35,3 +36,17 @@ def test_glob_files(tmp_path: Path) -> None:
     file_write(str(p2), "y")
     results = glob_files(str(tmp_path / "**" / "*.txt"))
     assert str(p1) in results and str(p2) in results
+
+
+def test_file_tools_respect_workspace_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    target = workspace / "pyproject.toml"
+    target.write_text("hello", encoding="utf-8")
+
+    monkeypatch.setenv("TEXTUAL_CLI_AGENT_ROOT", str(workspace))
+
+    assert file_read("/pyproject.toml") == "hello"
+    assert path_exists("/pyproject.toml")
