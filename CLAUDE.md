@@ -43,7 +43,7 @@ This is a Textual-based CLI LLM agent with MCP support and pluggable Python tool
 - Each provider handles its own message formatting and error handling
 - Providers translate between generic ToolSpec format and provider-specific schemas
 
-**Tool System** (`textual_cli_agent/tools.py`)
+**Tool System** (`textual_cli_agent/tools/`)
 - Decorator-based tool registration system using `@tool()`
 - Built-in tools: http_get, file_read/write, path_exists, glob_files, find_replace
 - Supports both sync and async tool functions with automatic detection
