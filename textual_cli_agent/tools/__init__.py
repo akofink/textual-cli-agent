@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .files import find_replace, file_read, file_write, glob_files, path_exists
+from .git import git_diff, git_log, git_status
 from .http import http_get
 from .parallel import ParallelTask, parallel_run
 from .registry import (
@@ -30,6 +31,9 @@ __all__ = [
     "glob_files",
     "path_exists",
     "http_get",
+    "git_status",
+    "git_diff",
+    "git_log",
     "ParallelTask",
     "parallel_run",
     "todo_add",

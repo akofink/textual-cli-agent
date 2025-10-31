@@ -107,6 +107,9 @@ If a connected MCP server exposes tools, they appear to the model as normal call
 - path_exists(path) -> bool
 - glob_files(pattern) -> list[str]
 - find_replace(pattern, replacement, paths, regex=False, encoding="utf-8") -> int
+- git_status(porcelain=True) -> str
+- git_diff(revision=None, path=None, staged=False) -> str
+- git_log(limit=5, oneline=True, path=None) -> str
 
 The implementations live under `textual_cli_agent/tools/`, which consolidates the registry (`registry.py`) and built-in tool modules for easier extension.
 
