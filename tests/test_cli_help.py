@@ -1,5 +1,8 @@
+import re
 import subprocess
 import sys
+
+_ANSI_ESCAPE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
 def test_cli_help_runs_without_textual() -> None:
@@ -13,4 +16,5 @@ def test_cli_help_runs_without_textual() -> None:
     )
     code = subprocess.run([sys.executable, "-c", cmd], capture_output=True, text=True)
     assert code.returncode == 0
-    assert "Usage: textual-cli-agent" in code.stdout
+    help_output = _ANSI_ESCAPE.sub("", code.stdout)
+    assert "Usage: textual-cli-agent" in help_output
