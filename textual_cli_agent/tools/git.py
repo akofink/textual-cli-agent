@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from ..workspace import workspace_root
 from .registry import tool
@@ -88,14 +88,20 @@ def git_diff(
 
 
 @tool(description="Show recent commits. Limit controls the number of entries.")
-def git_log(limit: int = 5, oneline: bool = True, path: Optional[str] = None) -> str:
-    if limit < 1:
+def git_log(
+    limit: Union[int, str] = 5, oneline: bool = True, path: Optional[str] = None
+) -> str:
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError):
+        raise GitToolError("limit must be an integer") from None
+    if limit_value < 1:
         raise GitToolError("limit must be a positive integer")
-    args: List[str] = ["log", f"-{limit}"]
+    args: List[str] = ["log", f"-{limit_value}"]
     if oneline:
         args.append("--oneline")
     if path:
-        args.append(path)
+        args.extend(["--", path])
     try:
         return _run_git(args)
     except GitToolError as exc:
