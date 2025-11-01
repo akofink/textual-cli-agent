@@ -43,7 +43,7 @@ build-backend = "setuptools.build_meta"
 exclude = ["prompts"]
 
 [tool.setuptools.package-data]
-textual_cli_agent = ["ui/*.tcss"]
+textual_cli_agent = ["ui/*.tcss", "prompts/*.txt"]
 
 [tool.uv]
 # Ensure uv recognizes this as a modern project

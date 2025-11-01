@@ -8,9 +8,10 @@ from typing import Optional, List
 import typer
 from rich.console import Console
 
+from .mcp.client import McpManager
+from .prompts import render_system_prompt
 from .providers.base import ProviderConfig, ProviderFactory
 from .tools import load_tools_from_modules
-from .mcp.client import McpManager
 from .workspace import WORKSPACE_ROOT_ENV
 
 app = typer.Typer(add_completion=False, help="Textual CLI Agent")
@@ -89,17 +90,8 @@ def chat(
             tool_names = (
                 "http_get, file_read, file_write, path_exists, glob_files, find_replace"
             )
-        system = (
-            "You are a helpful AI running in a terminal-based chat UI. "
-            "You have access to the local filesystem and other capabilities via callable tools. "
-            f"Available tools include: {tool_names}. "
-            "Use them when needed (e.g., read README.md or pyproject.toml to understand the repo). "
-            f"The current workspace root is: {workspace_dir}. "
-            "Interpret relative paths from that directory, and when tools fail on absolute paths, retry using workspace-relative variants. "
-            "When asked about the project, explore files and summarize. Be precise, cite filenames, and avoid hallucinations. "
-            "IMPORTANT: You have a limited number of tool-calling rounds per conversation (default 15). "
-            "Be strategic with tool usage - batch related operations when possible and prioritize the most important tasks. "
-            "If you reach the round limit, you'll be given one final opportunity to respond without tools."
+        system = render_system_prompt(
+            tool_names=tool_names, workspace_root=workspace_dir
         )
 
     # Adjust model defaults for provider-specific expectations
