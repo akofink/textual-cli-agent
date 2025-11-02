@@ -150,16 +150,6 @@ class ToolPanel(Container):
             self._update_tree()
             return
 
-        previous_turn = self._call_id_to_turn.get(call_id)
-        if previous_turn and previous_turn is not current_turn:
-            existing = self._find_tool_call(call_id, turns=[previous_turn])
-            if existing:
-                existing.args = args
-                if self._selected_call_id == call_id:
-                    self._show_call_details(existing)
-                self._update_tree()
-                return
-
         if self.current_turn:  # Type guard for mypy
             tool_call = ToolCall(id=call_id, name=name, args=args)
             self.current_turn.calls.append(tool_call)
