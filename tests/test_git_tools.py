@@ -34,6 +34,7 @@ def _init_repo(tmp_path: Path) -> Path:
     _run_git(["init"], repo)
     _run_git(["config", "user.name", "Test User"], repo)
     _run_git(["config", "user.email", "test@example.com"], repo)
+    _run_git(["config", "commit.gpgsign", "false"], repo)
     return repo
 
 
